@@ -35,22 +35,40 @@ import java.util.stream.Collectors;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertList;
 
 /**
- * Flowable 相关的工具方法
+ * Flowable 工具类，封装流程引擎中常用的工具方法，涵盖用户认证、租户上下文、流程实例状态、任务变量、表达式求值等场景。
  *
  * @author 芋道源码
  */
 public class FlowableUtils {
 
-    // ========== User 相关的工具方法 ==========
+    // ========== 用户认证相关 ==========
 
+    /**
+     * 设置 Flowable 当前认证用户 ID（字符串形式）。
+     * Flowable 内部使用字符串存储用户 ID，此处将 Long 转为 String。
+     *
+     * @param userId 用户 ID（Long 类型）
+     */
     public static void setAuthenticatedUserId(Long userId) {
         Authentication.setAuthenticatedUserId(String.valueOf(userId));
     }
 
+    /**
+     * 清除当前 Flowable 认证用户。
+     */
     public static void clearAuthenticatedUserId() {
         Authentication.setAuthenticatedUserId(null);
     }
 
+    /**
+     * 在指定用户身份下执行一段逻辑，并自动清理认证信息。
+     * 适用于需要以特定用户身份启动流程、执行任务等操作。
+     *
+     * @param userId   用户 ID
+     * @param callable 要执行的逻辑（Callable）
+     * @param <V>      返回值类型
+     * @return 执行结果
+     */
     public static <V> V executeAuthenticatedUserId(Long userId, Callable<V> callable) {
         setAuthenticatedUserId(userId);
         try {
@@ -62,25 +80,47 @@ public class FlowableUtils {
         }
     }
 
+    // ========== 租户（Tenant）上下文相关 ==========
+
+    /**
+     * 获取当前线程上下文中的租户 ID（字符串形式）。
+     * 若未设置租户，则返回 Flowable 定义的无租户标识（NO_TENANT_ID）。
+     *
+     * @return 租户 ID 字符串
+     */
     public static String getTenantId() {
         Long tenantId = TenantContextHolder.getTenantId();
         return tenantId != null ? String.valueOf(tenantId) : ProcessEngineConfiguration.NO_TENANT_ID;
     }
 
+    /**
+     * 在指定租户上下文中执行一段无返回值的逻辑。
+     * 若 tenantIdStr 为空或为 NO_TENANT_ID，则直接执行；否则切换租户上下文执行。
+     *
+     * @param tenantIdStr 租户 ID 字符串
+     * @param runnable    要执行的逻辑
+     */
     public static void execute(String tenantIdStr, Runnable runnable) {
-        if (ObjectUtil.isEmpty(tenantIdStr)
-                || Objects.equals(tenantIdStr, ProcessEngineConfiguration.NO_TENANT_ID)) {
-            runnable.run();
+        if (ObjectUtil.isEmpty(tenantIdStr) || Objects.equals(tenantIdStr, ProcessEngineConfiguration.NO_TENANT_ID)) {
+            runnable.run(); // 无租户上下文，直接执行
         } else {
             Long tenantId = Long.valueOf(tenantIdStr);
-            TenantUtils.execute(tenantId, runnable);
+            TenantUtils.execute(tenantId, runnable); // 在指定租户上下文中执行
         }
     }
 
+    /**
+     * 在指定租户上下文中执行一段有返回值的逻辑。
+     * 若 tenantIdStr 为空或为 NO_TENANT_ID，则直接执行；否则切换租户上下文执行。
+     *
+     * @param tenantIdStr 租户 ID 字符串
+     * @param callable    要执行的逻辑（Callable）
+     * @param <V>         返回值类型
+     * @return 执行结果
+     */
     @SneakyThrows
     public static <V> V execute(String tenantIdStr, Callable<V> callable) {
-        if (ObjectUtil.isEmpty(tenantIdStr)
-                || Objects.equals(tenantIdStr, ProcessEngineConfiguration.NO_TENANT_ID)) {
+        if (ObjectUtil.isEmpty(tenantIdStr) || Objects.equals(tenantIdStr, ProcessEngineConfiguration.NO_TENANT_ID)) {
             return callable.call();
         } else {
             Long tenantId = Long.valueOf(tenantIdStr);
@@ -88,63 +128,81 @@ public class FlowableUtils {
         }
     }
 
-    // ========== Execution 相关的工具方法 ==========
+    // ========== 执行上下文（Execution）变量命名 ==========
 
     /**
-     * 格式化多实例（并签、或签）的 collectionVariable 变量（多实例对应的多审批人列表）
+     * 格式化多实例任务中“审批人列表”变量名。
+     * 多实例节点（如并签、或签）会使用一个集合变量（collectionVariable）来存储所有审批人。
+     * 变量名格式：{activityId}_assignees
      *
-     * @param activityId 活动编号
-     * @return collectionVariable 变量
+     * @param activityId 活动节点 ID（如 userTask 的 id）
+     * @return 集合变量名
      */
     public static String formatExecutionCollectionVariable(String activityId) {
         return activityId + "_assignees";
     }
 
     /**
-     * 格式化多实例（并签、或签）的 collectionElementVariable 变量（当前实例对应的一个审批人）
+     * 格式化多实例任务中当前实例对应的“单个审批人”变量名。
+     * Flowable 会为每个实例创建一个元素变量（collectionElementVariable）。
+     * 变量名格式：{activityId}_assignee
      *
-     * @param activityId 活动编号
-     * @return collectionElementVariable 变量
+     * @param activityId 活动节点 ID
+     * @return 元素变量名
      */
     public static String formatExecutionCollectionElementVariable(String activityId) {
         return activityId + "_assignee";
     }
 
-    // ========== ProcessInstance 相关的工具方法 ==========
+    // ========== 流程实例（ProcessInstance）相关 ==========
 
+    /**
+     * 从运行中的流程实例中获取其状态（通过流程变量）。
+     *
+     * @param processInstance 运行中的流程实例
+     * @return 状态码（Integer）
+     */
     public static Integer getProcessInstanceStatus(ProcessInstance processInstance) {
         return getProcessInstanceStatus(processInstance.getProcessVariables());
     }
 
+    /**
+     * 从历史流程实例中获取其状态（通过流程变量）。
+     *
+     * @param processInstance 历史流程实例
+     * @return 状态码（Integer）
+     */
     public static Integer getProcessInstanceStatus(HistoricProcessInstance processInstance) {
         return getProcessInstanceStatus(processInstance.getProcessVariables());
     }
 
     /**
-     * 获得流程实例的状态
+     * 从流程变量 Map 中提取流程实例状态。
+     * 状态存储在名为 {@link BpmnVariableConstants#PROCESS_INSTANCE_VARIABLE_STATUS} 的变量中。
      *
-     * @param processVariables 流程实例的 variables
-     * @return 状态
+     * @param processVariables 流程变量 Map
+     * @return 状态码
      */
     private static Integer getProcessInstanceStatus(Map<String, Object> processVariables) {
         return (Integer) processVariables.get(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_STATUS);
     }
 
     /**
-     * 获得流程实例的审批原因
+     * 获取流程实例的审批原因（通常由发起人填写）。
      *
-     * @param processInstance 流程实例
-     * @return 审批原因
+     * @param processInstance 历史流程实例
+     * @return 审批原因字符串
      */
     public static String getProcessInstanceReason(HistoricProcessInstance processInstance) {
-        return (String) processInstance.getProcessVariables().get(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_REASON);
+        return (String) processInstance.getProcessVariables()
+                .get(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_REASON);
     }
 
     /**
-     * 获得流程实例的表单
+     * 获取运行中流程实例的业务表单数据（剔除系统变量）。
      *
-     * @param processInstance 流程实例
-     * @return 表单
+     * @param processInstance 运行中的流程实例
+     * @return 表单数据 Map
      */
     public static Map<String, Object> getProcessInstanceFormVariable(ProcessInstance processInstance) {
         Map<String, Object> processVariables = new HashMap<>(processInstance.getProcessVariables());
@@ -152,10 +210,10 @@ public class FlowableUtils {
     }
 
     /**
-     * 获得流程实例的表单
+     * 获取历史流程实例的业务表单数据（剔除系统变量）。
      *
-     * @param processInstance 流程实例
-     * @return 表单
+     * @param processInstance 历史流程实例
+     * @return 表单数据 Map
      */
     public static Map<String, Object> getProcessInstanceFormVariable(HistoricProcessInstance processInstance) {
         Map<String, Object> processVariables = new HashMap<>(processInstance.getProcessVariables());
@@ -163,33 +221,34 @@ public class FlowableUtils {
     }
 
     /**
-     * 过滤流程实例的表单
+     * 过滤流程变量，移除系统保留字段（如状态、审批原因等），仅保留用户填写的业务表单字段。
+     * 目前仅移除状态字段，若有其他系统字段需过滤，可在此扩展。
      *
-     * 为什么要过滤？目前使用 processVariables 存储所有流程实例的拓展字段，需要过滤掉一部分的系统字段，从而实现表单的展示
-     *
-     * @param processVariables 流程实例的 variables
-     * @return 过滤后的表单
+     * @param processVariables 原始流程变量
+     * @return 过滤后的业务表单数据
      */
     public static Map<String, Object> filterProcessInstanceFormVariable(Map<String, Object> processVariables) {
         processVariables.remove(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_STATUS);
+        // 注意：审批原因（reason）通常也属于业务字段，是否保留取决于业务需求，此处未移除
         return processVariables;
     }
 
     /**
-     * 获得流程实例的发起用户选择的审批人 Map
+     * 获取流程发起时用户手动选择的审批人映射（节点ID → 审批人列表）。
      *
      * @param processInstance 流程实例
-     * @return 发起用户选择的审批人 Map
+     * @return 审批人映射 Map
      */
     public static Map<String, List<Long>> getStartUserSelectAssignees(ProcessInstance processInstance) {
         return processInstance != null ? getStartUserSelectAssignees(processInstance.getProcessVariables()) : null;
     }
 
     /**
-     * 获得流程实例的发起用户选择的审批人 Map
+     * 从流程变量中解析发起人选择的审批人映射。
+     * 存储在 {@link BpmnVariableConstants#PROCESS_INSTANCE_VARIABLE_START_USER_SELECT_ASSIGNEES} 中。
      *
      * @param processVariables 流程变量
-     * @return 发起用户选择的审批人 Map
+     * @return 审批人映射 Map
      */
     @SuppressWarnings("unchecked")
     public static Map<String, List<Long>> getStartUserSelectAssignees(Map<String, Object> processVariables) {
@@ -201,20 +260,21 @@ public class FlowableUtils {
     }
 
     /**
-     * 获得流程实例的审批用户选择的下一个节点的审批人 Map
+     * 获取审批过程中用户动态选择的下一节点审批人（用于自由跳转或动态指派）。
      *
      * @param processInstance 流程实例
-     * @return 审批用户选择的下一个节点的审批人Map
+     * @return 审批人映射 Map
      */
     public static Map<String, List<Long>> getApproveUserSelectAssignees(ProcessInstance processInstance) {
         return processInstance != null ? getApproveUserSelectAssignees(processInstance.getProcessVariables()) : null;
     }
 
     /**
-     * 获得流程实例的审批用户选择的下一个节点的审批人 Map
+     * 从流程变量中解析审批人动态选择的下一节点审批人。
+     * 存储在 {@link BpmnVariableConstants#PROCESS_INSTANCE_VARIABLE_APPROVE_USER_SELECT_ASSIGNEES} 中。
      *
      * @param processVariables 流程变量
-     * @return 审批用户选择的下一个节点的审批人Map Map
+     * @return 审批人映射 Map
      */
     @SuppressWarnings("unchecked")
     public static Map<String, List<Long>> getApproveUserSelectAssignees(Map<String, Object> processVariables) {
@@ -226,24 +286,26 @@ public class FlowableUtils {
     }
 
     /**
-     * 获得流程实例的摘要
+     * 根据流程定义信息和流程变量，生成流程实例的“摘要”信息（用于列表页展示关键字段）。
+     * 仅当流程表单类型为 NORMAL（即内置表单）时生成摘要。
      *
-     * 仅有 {@link BpmModelFormTypeEnum#getType()} 表单，才有摘要。
-     * 原因是，只有它才有表单项的配置，从而可以根据配置，展示摘要。
+     * 摘要生成逻辑：
+     * 1. 若配置了自定义摘要字段，则按配置顺序展示；
+     * 2. 否则，默认展示表单前三个字段。
      *
-     * @param processDefinitionInfo 流程定义
-     * @param processVariables      流程实例的 variables
-     * @return 摘要
+     * @param processDefinitionInfo 流程定义扩展信息（含表单配置）
+     * @param processVariables      流程实例变量
+     * @return 摘要字段列表（键值对：标题 -> 值）
      */
     public static List<KeyValue<String, String>> getSummary(BpmProcessDefinitionInfoDO processDefinitionInfo,
                                                             Map<String, Object> processVariables) {
-        // 只有流程表单才会显示摘要！
+        // 仅 NORMAL 表单支持摘要
         if (ObjectUtil.isNull(processDefinitionInfo)
                 || !BpmModelFormTypeEnum.NORMAL.getType().equals(processDefinitionInfo.getFormType())) {
             return null;
         }
 
-        // 解析表单配置
+        // 解析表单字段配置：field → BpmFormFieldVO
         Map<String, BpmFormFieldVO> formFieldsMap = new HashMap<>();
         processDefinitionInfo.getFormFields().forEach(formFieldStr -> {
             BpmFormFieldVO formField = JsonUtils.parseObject(formFieldStr, BpmFormFieldVO.class);
@@ -252,43 +314,45 @@ public class FlowableUtils {
             }
         });
 
-        // 情况一：当自定义了摘要
+        // 情况一：使用自定义摘要配置
         if (ObjectUtil.isNotNull(processDefinitionInfo.getSummarySetting())
                 && Boolean.TRUE.equals(processDefinitionInfo.getSummarySetting().getEnable())) {
             return convertList(processDefinitionInfo.getSummarySetting().getSummary(), item -> {
-                BpmFormFieldVO formField = formFieldsMap.get(item);
+                BpmFormFieldVO formField = formFieldsMap.get(item); // item 为字段名
                 if (formField != null) {
-                    return new KeyValue<String, String>(formField.getTitle(),
-                            processVariables.getOrDefault(item, "").toString());
+                    String value = processVariables.getOrDefault(item, "").toString();
+                    return new KeyValue<>(formField.getTitle(), value);
                 }
                 return null;
             });
         }
 
-        // 情况二：默认摘要展示前三个表单字段
+        // 情况二：默认展示前三个字段
         return formFieldsMap.entrySet().stream()
                 .limit(3)
-                .map(entry -> new KeyValue<>(entry.getValue().getTitle(),
-                        MapUtil.getStr(processVariables, entry.getValue().getField(), "")))
+                .map(entry -> new KeyValue<>(
+                        entry.getValue().getTitle(),
+                        MapUtil.getStr(processVariables, entry.getValue().getField(), "")
+                ))
                 .collect(Collectors.toList());
     }
 
-    // ========== Task 相关的工具方法 ==========
+    // ========== 任务（Task）相关 ==========
 
     /**
-     * 获得任务的状态
+     * 从任务本地变量中获取任务状态。
      *
-     * @param task 任务
-     * @return 状态
+     * @param task 任务信息（TaskInfo）
+     * @return 任务状态码
      */
     public static Integer getTaskStatus(TaskInfo task) {
         return (Integer) task.getTaskLocalVariables().get(BpmnVariableConstants.TASK_VARIABLE_STATUS);
     }
 
     /**
-     * 获得任务的审批原因
+     * 获取任务的审批原因（由审批人填写）。
      *
-     * @param task 任务
+     * @param task 任务信息
      * @return 审批原因
      */
     public static String getTaskReason(TaskInfo task) {
@@ -296,9 +360,9 @@ public class FlowableUtils {
     }
 
     /**
-     * 获得任务的签名图片 URL
+     * 获取任务的电子签名图片 URL（如手写签名）。
      *
-     * @param task 任务
+     * @param task 任务信息
      * @return 签名图片 URL
      */
     public static String getTaskSignPicUrl(TaskInfo task) {
@@ -306,10 +370,10 @@ public class FlowableUtils {
     }
 
     /**
-     * 获得任务的表单
+     * 获取任务的业务表单数据（剔除系统变量）。
      *
-     * @param task 任务
-     * @return 表单
+     * @param task 任务信息
+     * @return 表单数据 Map
      */
     public static Map<String, Object> getTaskFormVariable(TaskInfo task) {
         Map<String, Object> formVariables = new HashMap<>(task.getTaskLocalVariables());
@@ -318,21 +382,28 @@ public class FlowableUtils {
     }
 
     /**
-     * 过滤任务的表单
+     * 过滤任务本地变量，移除系统字段（状态、原因等），保留业务字段。
      *
-     * 为什么要过滤？目前使用 taskLocalVariables 存储所有任务的拓展字段，需要过滤掉一部分的系统字段，从而实现表单的展示
-     *
-     * @param taskLocalVariables 任务的 taskLocalVariables
-     * @return 过滤后的表单
+     * @param taskLocalVariables 任务本地变量
+     * @return 过滤后的业务表单数据
      */
     public static Map<String, Object> filterTaskFormVariable(Map<String, Object> taskLocalVariables) {
         taskLocalVariables.remove(BpmnVariableConstants.TASK_VARIABLE_STATUS);
         taskLocalVariables.remove(BpmnVariableConstants.TASK_VARIABLE_REASON);
+        // TASK_SIGN_PIC_URL 通常作为业务数据保留，故未移除
         return taskLocalVariables;
     }
 
-    // ========== Expression 相关的工具方法 ==========
+    // ========== 表达式求值（Expression Evaluation） ==========
 
+    /**
+     * 在指定流程引擎配置和变量容器下，求值一个 EL 表达式。
+     *
+     * @param variableContainer           变量容器（提供表达式求值所需的上下文变量）
+     * @param expressionString            表达式字符串（如 ${assignee == '1001'}）
+     * @param processEngineConfiguration  流程引擎配置（用于获取 ExpressionManager）
+     * @return 表达式求值结果
+     */
     private static Object getExpressionValue(VariableContainer variableContainer, String expressionString,
                                              ProcessEngineConfigurationImpl processEngineConfiguration) {
         assert processEngineConfiguration != null;
@@ -342,18 +413,35 @@ public class FlowableUtils {
         return expression.getValue(variableContainer);
     }
 
+    /**
+     * 求值 EL 表达式，自动从当前 Flowable 上下文中获取引擎配置。
+     * 若在 Flowable 命令上下文外调用（如 Controller 层），则通过 ManagementService 间接获取。
+     *
+     * @param variableContainer 变量容器
+     * @param expressionString  表达式字符串
+     * @return 表达式结果
+     */
     public static Object getExpressionValue(VariableContainer variableContainer, String expressionString) {
         ProcessEngineConfigurationImpl processEngineConfiguration = CommandContextUtil.getProcessEngineConfiguration();
         if (processEngineConfiguration != null) {
+            // 在 Flowable 命令上下文中，直接使用
             return getExpressionValue(variableContainer, expressionString, processEngineConfiguration);
         }
-        // 如果 ProcessEngineConfigurationImpl 获取不到，则需要通过 ManagementService 来获取
+        // 不在 Flowable 上下文中，通过 ManagementService 执行命令获取
         ManagementService managementService = SpringUtil.getBean(ManagementService.class);
         assert managementService != null;
         return managementService.executeCommand(context ->
                 getExpressionValue(variableContainer, expressionString, CommandContextUtil.getProcessEngineConfiguration()));
     }
 
+    /**
+     * 对 Map 形式的变量进行 EL 表达式求值。
+     * 内部将 Map 包装为 VariableContainer。
+     *
+     * @param variable         变量 Map
+     * @param expressionString 表达式字符串
+     * @return 表达式结果
+     */
     public static Object getExpressionValue(Map<String, Object> variable, String expressionString) {
         VariableContainer variableContainer = new MapDelegateVariableContainer(variable, VariableContainer.empty());
         return getExpressionValue(variableContainer, expressionString);
