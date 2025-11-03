@@ -19,9 +19,18 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 自定义的【并行】的【多个】流程任务的 assignee 负责人的分配
- * 第一步，基于分配规则，计算出分配任务的【多个】候选人们。
- * 第二步，将【多个】任务候选人们，设置到 DelegateExecution 的 collectionVariable 变量中，以便 BpmUserTaskActivityBehavior 使用它
+ * 自定义的【并行多实例】行为类，用于替代 Flowable 默认的 ParallelMultiInstanceBehavior。
+ *
+ * <p>核心目标：在并行多实例任务中，动态计算并设置每个任务实例的负责人（assignee）。
+ * 传统方式依赖 BPMN 中的 collectionVariable 表达式，但本项目采用业务逻辑动态计算任务候选人。
+ *
+ * <p>关键机制：
+ * 1. 当前节点为 UserTask 时，调用 {@link BpmTaskCandidateInvoker} 计算出所有可能的处理人（assigneeUserIds）。
+ * 2. 将这些处理人存入 execution 的局部变量（local variable）中，变量名由活动 ID 动态生成。
+ * 3. 后续 {@link BpmUserTaskActivityBehavior} 会读取该变量，为每个实例创建对应的任务，并设置 assignee。
+ * 4. 若无处理人，则插入一个 null 元素，确保至少生成一个任务（用于“自动通过/拒绝”等场景）。
+ *
+ * <p>同时支持 CallActivity（子流程调用）的多实例场景，根据子流程来源类型（表单数字 or 表单列表）确定实例数量。
  *
  * @author kemengkai
  * @since 2022-04-21 16:57
@@ -29,62 +38,94 @@ import java.util.Set;
 @Setter
 public class BpmParallelMultiInstanceBehavior extends ParallelMultiInstanceBehavior {
 
+    /**
+     * 任务候选人计算器，由 Spring 容器注入。
+     * 用于根据当前执行上下文（如流程变量、节点配置等）动态计算出任务的处理人集合。
+     */
     private BpmTaskCandidateInvoker taskCandidateInvoker;
 
+    /**
+     * 构造函数，调用父类构造器。
+     *
+     * @param activity            当前多实例活动（如 UserTask 或 CallActivity）
+     * @param innerActivityBehavior 内部活动行为（例如 UserTask 的默认行为）
+     */
     public BpmParallelMultiInstanceBehavior(Activity activity,
                                             AbstractBpmnActivityBehavior innerActivityBehavior) {
         super(activity, innerActivityBehavior);
     }
 
     /**
-     * 重写该方法，主要实现两个功能：
-     * 1. 忽略原有的 collectionVariable、collectionElementVariable 表达式，而是采用自己定义的
-     * 2. 获得任务的处理人，并设置到 collectionVariable 中，用于 BpmUserTaskActivityBehavior 从中可以获取任务的处理人
+     * 重写父类方法，用于确定并行多实例的任务实例数量（nrOfInstances）。
      *
-     * 注意，多个任务实例，每个任务实例对应一个处理人，所以返回的数量就是任务处理人的数量
+     * <p>本方法的核心职责：
+     * - 对于 UserTask：完全绕过 BPMN 中定义的 collectionExpression，改用业务逻辑计算处理人；
+     *   并将处理人集合存入 execution 变量，供后续任务创建使用。
+     * - 对于 CallActivity：根据子流程多实例的来源类型，从流程变量中读取实例数量。
      *
-     * @param execution 执行任务
-     * @return 数量
+     * 注意：此方法必须返回实际要创建的实例数量。
+     *
+     * @param execution 当前执行实例（包含流程变量、当前节点等上下文信息）
+     * @return 需要创建的并行实例数量
      */
     @Override
     protected int resolveNrOfInstances(DelegateExecution execution) {
-        // 情况一：UserTask 节点
-        if (execution.getCurrentFlowElement() instanceof UserTask) {
-            // 第一步，设置 collectionVariable 和 CollectionVariable
-            // 从  execution.getVariable() 读取所有任务处理人的 key
-            super.collectionExpression = null; // collectionExpression 和 collectionVariable 是互斥的
+        FlowElement currentElement = execution.getCurrentFlowElement();
+
+        // ========== 情况一：当前节点是 UserTask（用户任务） ==========
+        if (currentElement instanceof UserTask) {
+            // Step 1: 动态设置多实例所需的变量名
+            // Flowable 要求必须设置 collectionVariable（集合变量名）和 collectionElementVariable（每个元素的变量名）
+            // 这里根据当前活动 ID 生成唯一变量名，避免不同节点冲突
+            super.collectionExpression = null; // 清除表达式模式（与 collectionVariable 互斥）
             super.collectionVariable = FlowableUtils.formatExecutionCollectionVariable(execution.getCurrentActivityId());
-            // 从 execution.getVariable() 读取当前所有任务处理的人的 key
             super.collectionElementVariable = FlowableUtils.formatExecutionCollectionElementVariable(execution.getCurrentActivityId());
 
-            // 第二步，获取任务的所有处理人
+            // Step 2: 尝试从 execution 中获取已缓存的处理人集合（防止重复计算）
             @SuppressWarnings("unchecked")
             Set<Long> assigneeUserIds = (Set<Long>) execution.getVariable(super.collectionVariable, Set.class);
+
             if (assigneeUserIds == null) {
+                // 未缓存，则调用业务逻辑计算处理人
                 assigneeUserIds = taskCandidateInvoker.calculateUsersByTask(execution);
+
+                // 特殊处理：如果计算结果为空（例如审批人未指定），仍需生成至少一个任务实例
+                // 原因：某些场景（如“自动通过”、“自动拒绝”）需要任务存在，但 assignee 为 null
+                // 插入一个 null 元素，确保后续 BpmUserTaskActivityBehavior 能创建一个任务
                 if (CollUtil.isEmpty(assigneeUserIds)) {
-                    // 特殊：如果没有处理人的情况下，至少有一个 null 空元素，避免自动通过！
-                    // 这样，保证在 BpmUserTaskActivityBehavior 至少创建出一个 Task 任务
-                    // 用途：1）审批人为空时；2）审批类型为自动通过、自动拒绝时
                     assigneeUserIds = SetUtils.asSet((Long) null);
                 }
+
+                // 将计算出的处理人集合存入 execution 的【局部变量】（setVariableLocal）
+                // 使用局部变量而非全局变量，避免影响父流程或其他并行分支
                 execution.setVariableLocal(super.collectionVariable, assigneeUserIds);
             }
+
+            // 返回处理人数量，即需要创建的并行任务实例数
             return assigneeUserIds.size();
         }
 
-        // 情况二：CallActivity 节点
-        if (execution.getCurrentFlowElement() instanceof CallActivity) {
-            FlowElement flowElement = execution.getCurrentFlowElement();
-            Integer sourceType = BpmnModelUtils.parseMultiInstanceSourceType(flowElement);
-            if (sourceType.equals(BpmChildProcessMultiInstanceSourceTypeEnum.NUMBER_FORM.getType())) {
+        // ========== 情况二：当前节点是 CallActivity（调用子流程） ==========
+        if (currentElement instanceof CallActivity) {
+            // 从 BPMN 模型中解析子流程多实例的来源类型（数字 or 列表）
+            Integer sourceType = BpmnModelUtils.parseMultiInstanceSourceType(currentElement);
+
+            // 根据来源类型，从流程变量中读取对应的值来决定实例数量
+            if (BpmChildProcessMultiInstanceSourceTypeEnum.NUMBER_FORM.getType().equals(sourceType)) {
+                // 类型为“数字表单”：变量值为 Integer，直接返回该数值
                 return execution.getVariable(super.collectionExpression.getExpressionText(), Integer.class);
             }
-            if (sourceType.equals(BpmChildProcessMultiInstanceSourceTypeEnum.MULTIPLE_FORM.getType())) {
-                return execution.getVariable(super.collectionExpression.getExpressionText(), List.class).size();
+
+            if (BpmChildProcessMultiInstanceSourceTypeEnum.MULTIPLE_FORM.getType().equals(sourceType)) {
+                // 类型为“多选表单”：变量值为 List，返回列表大小
+                @SuppressWarnings("unchecked")
+                List<?> list = execution.getVariable(super.collectionExpression.getExpressionText(), List.class);
+                return list != null ? list.size() : 0;
             }
         }
 
+        // ========== 其他情况：回退到父类默认逻辑 ==========
+        // 理论上不会走到这里，但保留以确保兼容性
         return super.resolveNrOfInstances(execution);
     }
 
