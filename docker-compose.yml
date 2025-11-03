@@ -6,7 +6,7 @@ services:
     container_name: yudao-postgres
     restart: always
     environment:
-      POSTGRES_DB: ruoyi-vue-pro
+      POSTGRES_DB: app
       POSTGRES_USER: root
       POSTGRES_PASSWORD: 123456
       TZ: Asia/Shanghai
@@ -18,7 +18,7 @@ services:
     networks:
       - yudao-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d ruoyi-vue-pro"]
+      test: ["CMD-SHELL", "pg_isready -U root -d app"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -43,6 +43,8 @@ services:
       retries: 5
 
 volumes:
+  mysql-data:
+    driver: local
   postgres-data:
     driver: local
   redis-data:
