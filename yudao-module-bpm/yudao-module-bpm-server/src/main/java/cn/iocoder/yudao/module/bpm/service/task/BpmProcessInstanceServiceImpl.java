@@ -1037,10 +1037,26 @@ public class BpmProcessInstanceServiceImpl implements BpmProcessInstanceService 
         return instance.getId();
     }
 
+    /**
+     * 校验发起人自选审批人配置
+     * 
+     * 说明：当流程中某些节点配置为"发起人自选审批人"策略时，需要在流程发起时校验：
+     * 1. 发起人是否为所有自选节点都指定了审批人
+     * 2. 指定的审批人是否都是有效用户
+     * 
+     * 使用场景：
+     * - 临时项目审批流程，由发起人指定评审专家
+     * - 跨部门协作流程，由发起人指定协作人员
+     * 
+     * @param userId 发起人用户 ID
+     * @param definition 流程定义
+     * @param startUserSelectAssignees 发起人选择的审批人映射（节点 ID -> 审批人 ID 列表）
+     * @param variables 流程变量
+     */
     private void validateStartUserSelectAssignees(Long userId, ProcessDefinition definition,
                                                   Map<String, List<Long>> startUserSelectAssignees,
                                                   Map<String, Object> variables) {
-        // 1. 获取预测的节点信息
+        // 1. 获取流程的预测节点信息（根据流程变量预测会经过哪些节点）
         BpmApprovalDetailRespVO detailRespVO = getApprovalDetail(userId, new BpmApprovalDetailReqVO()
                 .setProcessDefinitionId(definition.getId())
                 .setProcessVariables(variables));
@@ -1049,40 +1065,76 @@ public class BpmProcessInstanceServiceImpl implements BpmProcessInstanceService 
             return;
         }
 
-        // 2.1 移除掉不是发起人自选审批人节点
+        // 2. 筛选出需要"发起人自选审批人"的节点
         activityNodes.removeIf(task ->
-                ObjectUtil.notEqual(BpmTaskCandidateStrategyEnum.START_USER_SELECT.getStrategy(), task.getCandidateStrategy()));
-        // 2.2 流程发起时要先获取当前流程的预测走向节点，发起时只校验预测的节点发起人自选审批人的审批人和抄送人是否都配置了
+                ObjectUtil.notEqual(BpmTaskCandidateStrategyEnum.START_USER_SELECT.getStrategy(), 
+                        task.getCandidateStrategy()));
+        
+        // 3. 校验每个自选节点是否都配置了审批人
+        // 只校验预测的节点，因为实际执行时可能因条件分支走向不同而跳过某些节点
         activityNodes.forEach(task -> {
-            List<Long> assignees = startUserSelectAssignees != null ? startUserSelectAssignees.get(task.getId()) : null;
+            // 3.1 获取该节点的审批人列表
+            List<Long> assignees = startUserSelectAssignees != null ? 
+                    startUserSelectAssignees.get(task.getId()) : null;
+            
+            // 3.2 校验是否为该节点配置了审批人
             if (CollUtil.isEmpty(assignees)) {
                 throw exception(PROCESS_INSTANCE_START_USER_SELECT_ASSIGNEES_NOT_CONFIG, task.getName());
             }
+            
+            // 3.3 校验配置的审批人是否都是有效用户
             Map<Long, AdminUserRespDTO> userMap = adminUserApi.getUserMap(assignees);
             assignees.forEach(assignee -> {
                 if (userMap.get(assignee) == null) {
-                    throw exception(PROCESS_INSTANCE_START_USER_SELECT_ASSIGNEES_NOT_EXISTS, task.getName(), assignee);
+                    throw exception(PROCESS_INSTANCE_START_USER_SELECT_ASSIGNEES_NOT_EXISTS, 
+                            task.getName(), assignee);
                 }
             });
         });
     }
 
+    /**
+     * 生成流程实例名称
+     * 
+     * 说明：根据配置的标题模板生成动态流程实例名称
+     * 支持使用流程变量作为占位符，例如：
+     * - ${startUserName}的请假申请
+     * - ${startTime} 报销单
+     * - ${amount}元采购申请
+     * 
+     * @param userId 发起人用户 ID
+     * @param definition 流程定义
+     * @param definitionInfo 流程定义扩展信息（包含标题配置）
+     * @param variables 流程变量
+     * @return 生成的流程实例名称
+     */
     private String generateProcessInstanceName(Long userId,
                                                ProcessDefinition definition,
                                                BpmProcessDefinitionInfoDO definitionInfo,
                                                Map<String, Object> variables) {
+        // 1. 基础校验
         if (definition == null || definitionInfo == null) {
             return null;
         }
+        
+        // 2. 获取标题配置
         BpmModelMetaInfoVO.TitleSetting titleSetting = definitionInfo.getTitleSetting();
+        // 如果未配置标题或未启用，则使用流程定义名称
         if (titleSetting == null || !BooleanUtil.isTrue(titleSetting.getEnable())) {
             return definition.getName();
         }
+        
+        // 3. 准备标题模板变量
         AdminUserRespDTO user = adminUserApi.getUser(userId).getCheckedData();
         Map<String, Object> cloneVariables = new HashMap<>(variables);
+        // 添加系统变量：发起人昵称
         cloneVariables.put(BpmnVariableConstants.PROCESS_INSTANCE_VARIABLE_START_USER_ID, user.getNickname());
+        // 添加系统变量：流程发起时间
         cloneVariables.put(BpmnVariableConstants.PROCESS_START_TIME, DateUtil.now());
+        // 添加系统变量：流程定义名称
         cloneVariables.put(BpmnVariableConstants.PROCESS_DEFINITION_NAME, definition.getName().trim());
+        
+        // 4. 使用模板引擎替换占位符，生成最终标题
         return StrUtil.format(definitionInfo.getTitleSetting().getTitle(), cloneVariables);
     }
 
@@ -1320,28 +1372,51 @@ public class BpmProcessInstanceServiceImpl implements BpmProcessInstanceService 
         }
     }
 
+    /**
+     * 处理流程实例创建事件
+     * 
+     * 说明：当流程实例刚创建时，Flowable 会触发此方法
+     * 此方法负责：
+     * 1. 生成流程实例名称（特别是处理子流程标题）
+     * 2. 执行流程前置触发器（HTTP 回调）
+     * 
+     * 注意：这些操作必须在事务提交后执行，确保流程变量已正确保存
+     * 
+     * @param instance 新创建的流程实例对象
+     */
     @Override
     public void processProcessInstanceCreated(ProcessInstance instance) {
-        BpmProcessDefinitionInfoDO processDefinitionInfo = processDefinitionService.
-                getProcessDefinitionInfo(instance.getProcessDefinitionId());
-        ProcessDefinition processDefinition = processDefinitionService.getProcessDefinition(instance.getProcessDefinitionId());
+        // 1. 获取流程定义信息
+        BpmProcessDefinitionInfoDO processDefinitionInfo = processDefinitionService
+                .getProcessDefinitionInfo(instance.getProcessDefinitionId());
+        ProcessDefinition processDefinition = processDefinitionService
+                .getProcessDefinition(instance.getProcessDefinitionId());
+        
+        // 如果流程定义不存在，直接返回
         if (processDefinition == null || processDefinitionInfo == null) {
             return;
         }
 
-        // 自定义标题。目的：主要处理子流程的标题无法处理
-        // 注意：必须使用 TransactionSynchronizationManager 事务提交后，否则不生效！！！
+        // 2. 注册事务同步回调（在事务提交后执行）
+        // 必须使用事务同步机制，否则流程变量可能还未保存到数据库
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 
             @Override
             public void afterCommit() {
+                // ========== 2.1 生成并设置流程实例名称 ==========
+                
+                // 重新生成流程实例名称（主要用于处理子流程的标题）
+                // 子流程在创建时可能无法获取完整的流程变量，需要在事务提交后重新生成标题
                 String name = generateProcessInstanceName(Long.valueOf(instance.getStartUserId()),
                         processDefinition, processDefinitionInfo, instance.getProcessVariables());
                 if (ObjUtil.notEqual(instance.getName(), name)) {
                     runtimeService.setProcessInstanceName(instance.getProcessInstanceId(), name);
                 }
 
-                // 流程前置通知：需要在流程启动后(事务提交后)，保证 variables 已设置
+                // ========== 2.2 执行流程前置触发器 ==========
+                
+                // 流程启动后立即执行 HTTP 回调（如果配置了前置触发器）
+                // 使用场景：流程启动时需要通知外部系统，如发送短信、更新业务状态等
                 // 相关问题链接：https://t.zsxq.com/DF7Kq
                 if (ObjUtil.isNull(processDefinitionInfo.getProcessBeforeTriggerSetting())) {
                     return;
