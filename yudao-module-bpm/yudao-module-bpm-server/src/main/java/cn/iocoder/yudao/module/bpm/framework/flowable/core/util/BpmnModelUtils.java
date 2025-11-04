@@ -45,59 +45,129 @@ public class BpmnModelUtils {
 
     // ========== BPMN 修改 + 解析元素相关的方法 ==========
 
+    /**
+     * 给流程节点添加扩展元素（字符串值）
+     * 
+     * 说明：扩展元素是 Flowable 提供的一种机制，用于在 BPMN 标准节点上添加自定义属性
+     * 例如：可以在用户任务上添加候选人策略、审批类型等业务属性
+     *
+     * @param element 流程节点（如用户任务、服务任务等）
+     * @param name 扩展元素的名称（如 "candidateStrategy"）
+     * @param value 扩展元素的值（字符串形式）
+     */
     public static void addExtensionElement(FlowElement element, String name, String value) {
+        // 如果值为空，直接返回，不添加扩展元素
         if (value == null) {
             return;
         }
+        // 创建一个新的扩展元素对象
         ExtensionElement extensionElement = new ExtensionElement();
+        // 设置命名空间，标识这是 Flowable 的扩展
         extensionElement.setNamespace(FLOWABLE_EXTENSIONS_NAMESPACE);
+        // 设置命名空间前缀（通常是 "flowable"）
         extensionElement.setNamespacePrefix(FLOWABLE_EXTENSIONS_PREFIX);
+        // 设置扩展元素的文本内容（实际的值）
         extensionElement.setElementText(value);
+        // 设置扩展元素的名称（用于标识这个扩展元素）
         extensionElement.setName(name);
+        // 将扩展元素添加到流程节点上
         element.addExtensionElement(extensionElement);
     }
 
+    /**
+     * 给流程节点添加扩展元素（整数值）
+     * 
+     * 这是一个重载方法，用于处理整数类型的扩展元素值
+     * 内部会将整数转换为字符串后调用字符串版本的方法
+     *
+     * @param element 流程节点
+     * @param name 扩展元素的名称
+     * @param value 扩展元素的值（整数形式）
+     */
     public static void addExtensionElement(FlowElement element, String name, Integer value) {
+        // 如果值为空，直接返回
         if (value == null) {
             return;
         }
+        // 将整数转换为字符串，然后调用字符串版本的方法
         addExtensionElement(element, name, String.valueOf(value));
     }
 
+    /**
+     * 给流程节点添加扩展元素（JSON 对象值）
+     * 
+     * 这是一个重载方法，用于处理复杂对象类型的扩展元素值
+     * 会将对象序列化为 JSON 字符串后存储
+     * 
+     * 使用场景：当需要存储复杂的配置对象时使用，如监听器配置、按钮设置等
+     *
+     * @param element 流程节点
+     * @param name 扩展元素的名称
+     * @param value 扩展元素的值（任意对象，会被转换为 JSON）
+     */
     public static void addExtensionElementJson(FlowElement element, String name, Object value) {
+        // 如果值为空，直接返回
         if (value == null) {
             return;
         }
+        // 将对象转换为 JSON 字符串，然后调用字符串版本的方法
         addExtensionElement(element, name, JsonUtils.toJsonString(value));
     }
 
+    /**
+     * 给流程节点添加扩展元素（带属性的复杂结构）
+     * 
+     * 这个方法与前面的不同，它不是设置元素的文本内容，而是设置元素的属性
+     * 一个扩展元素可以包含多个属性（key-value 对）
+     * 
+     * 使用场景：如表单字段权限配置，需要同时保存字段名和权限类型
+     *
+     * @param element 流程节点
+     * @param name 扩展元素的名称
+     * @param attributes 属性映射表（key: 属性名, value: 属性值）
+     */
     public static void addExtensionElement(FlowElement element, String name, Map<String, String> attributes) {
+        // 如果属性映射为空，直接返回
         if (attributes == null) {
             return;
         }
+        // 创建一个新的扩展元素对象
         ExtensionElement extensionElement = new ExtensionElement();
+        // 设置命名空间
         extensionElement.setNamespace(FLOWABLE_EXTENSIONS_NAMESPACE);
+        // 设置命名空间前缀
         extensionElement.setNamespacePrefix(FLOWABLE_EXTENSIONS_PREFIX);
+        // 设置扩展元素的名称
         extensionElement.setName(name);
+        // 遍历属性映射，为每个属性创建一个扩展属性对象并添加到扩展元素中
         attributes.forEach((key, value) -> {
+            // 创建扩展属性对象（key-value 对）
             ExtensionAttribute extensionAttribute = new ExtensionAttribute(key, value);
+            // 将属性添加到扩展元素
             extensionElement.addAttribute(extensionAttribute);
         });
+        // 将完整的扩展元素（包含所有属性）添加到流程节点上
         element.addExtensionElement(extensionElement);
     }
 
     /**
      * 解析扩展元素
      *
+     * 说明：不少业务逻辑会把自定义配置写到扩展元素里，这个方法可以从节点上读取指定名称的扩展值
+     * 使用流程：首先通过名称从节点的扩展元素 Map 中取到列表，再读取第一个元素的文本内容
+     *
      * @param flowElement 节点
      * @param elementName 元素名称
      * @return 扩展元素
      */
     public static String parseExtensionElement(FlowElement flowElement, String elementName) {
+        // 如果节点为空，直接返回空，避免空指针
         if (flowElement == null) {
             return null;
         }
+        // Flowable 会把相同名称的扩展元素放在列表中，这里取第一个作为结果
         ExtensionElement element = CollUtil.getFirst(flowElement.getExtensionElements().get(elementName));
+        // 如果找到了扩展元素，返回它的文本内容；否则返回空
         return element != null ? element.getElementText() : null;
     }
 
@@ -109,8 +179,10 @@ public class BpmnModelUtils {
      * @param flowElement 节点
      */
     public static void addCandidateElements(Integer candidateStrategy, String candidateParam, FlowElement flowElement) {
+        // 保存候选人策略（如指定用户、角色、部门等）
         addExtensionElement(flowElement, BpmnModelConstants.USER_TASK_CANDIDATE_STRATEGY,
                 candidateStrategy == null ? null : candidateStrategy.toString());
+        // 保存候选人参数（如具体的用户 ID 列表、角色编号等）
         addExtensionElement(flowElement, BpmnModelConstants.USER_TASK_CANDIDATE_PARAM, candidateParam);
     }
 
@@ -121,10 +193,12 @@ public class BpmnModelUtils {
      * @return 候选人策略
      */
     public static Integer parseCandidateStrategy(FlowElement userTask) {
+        // 先尝试从节点的属性中读取（Flowable 设计上支持把常用字段直接放在属性里）
         Integer candidateStrategy = NumberUtils.parseInt(userTask.getAttributeValue(
                 BpmnModelConstants.NAMESPACE, BpmnModelConstants.USER_TASK_CANDIDATE_STRATEGY));
         // TODO @芋艿 尝试从 ExtensionElement 取. 后续相关扩展是否都可以 存 extensionElement。 如表单权限。 按钮权限
         if (candidateStrategy == null) {
+            // 若属性中没有，再从扩展元素中读取，兼容旧数据或自定义存储方式
             ExtensionElement element = CollUtil.getFirst(userTask.getExtensionElements().get(BpmnModelConstants.USER_TASK_CANDIDATE_STRATEGY));
             candidateStrategy = element != null ? NumberUtils.parseInt(element.getElementText()) : null;
         }
@@ -138,9 +212,11 @@ public class BpmnModelUtils {
      * @return 候选人参数
      */
     public static String parseCandidateParam(FlowElement userTask) {
+        // 从节点的属性中读取候选人参数（如用户 ID、部门 ID 等）
         String candidateParam = userTask.getAttributeValue(
                 BpmnModelConstants.NAMESPACE, BpmnModelConstants.USER_TASK_CANDIDATE_PARAM);
         if (candidateParam == null) {
+            // 如果属性里没有值，继续尝试从扩展元素中获取，保证兼容性
             ExtensionElement element = CollUtil.getFirst(userTask.getExtensionElements().get(BpmnModelConstants.USER_TASK_CANDIDATE_PARAM));
             candidateParam = element != null ? element.getElementText() : null;
         }

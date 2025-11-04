@@ -102,6 +102,11 @@ public class SimpleModelUtils {
      * @param process BPMN 流程
      */
     private static void traverseNodeToBuildFlowNode(BpmSimpleModelNodeVO node, Process process) {
+        // =============== 第一阶段：将『简单模型节点』转换成 Flowable 可识别的 BPMN 元素 ===============
+        // 说明：
+        // 前端拖拽形成的是一个自定义的简单数据结构(simple model)，这里需要把它逐个“翻译”成 BPMN 里的节点对象（如：StartEvent、UserTask、Gateway 等），
+        // 才能让 Flowable 引擎理解并执行。这个方法只做“节点创建”，不处理节点之间的连线；连线在 traverseNodeToBuildSequenceFlow 中处理。
+
         // 1. 判断是否有效节点
         if (!isValidNode(node)) {
             return;
@@ -134,6 +139,12 @@ public class SimpleModelUtils {
      * @param targetNodeId 目标节点 ID
      */
     private static void traverseNodeToBuildSequenceFlow(Process process, BpmSimpleModelNodeVO node, String targetNodeId) {
+        // =============== 第二阶段：为前面创建的 BPMN 节点补上『连线』(SequenceFlow) ===============
+        // 思路：
+        // 1. 递归从当前节点向后看，决定它应该指向哪个下一个节点。
+        // 2. 普通节点：直接连到它的 childNode；如果没有 childNode，则连到外层传入的 targetNodeId（通常是结束节点或分支的汇聚点）。
+        // 3. 分支节点：分类型处理（条件、并行、包容、路由），为每个分支建立连线，并在必要时创建“汇聚”网关的连线。
+        // 注意：这里不再创建节点对象，只是补全节点之间的连接关系。
         // 1.1 无效节点返回
         if (!isValidNode(node)) {
             return;
@@ -162,6 +173,11 @@ public class SimpleModelUtils {
      * @param targetNodeId 目标节点 ID
      */
     private static void traverseNormalNodeToBuildSequenceFlow(Process process, BpmSimpleModelNodeVO node, String targetNodeId) {
+        // 普通节点（非分支网关）：
+        // 目标判定规则：
+        //   有合法的 childNode => 线指向 childNode
+        //   没有 childNode => 线指向外部传入的 targetNodeId（例如：后续的结束节点或上层设定的“分支终点”）
+        // 附加节点(attachNode)：某些业务节点需要“挂”一个边界等待/回调节点，流程走法变成：当前节点 -> 附加节点 -> 下一个节点
         BpmSimpleModelNodeVO childNode = node.getChildNode();
         boolean isChildNodeValid = isValidNode(childNode);
         // 情况一：有“子”节点，则建立连线
@@ -192,6 +208,10 @@ public class SimpleModelUtils {
      * @param targetNodeId 目标节点 ID
      */
     private static List<SequenceFlow> buildAttachNodeSequenceFlow(String nodeId, String attachNodeId, String targetNodeId) {
+        // 对于带“附加”行为的节点（如：触发器 HTTP 回调，需等待外部通知）：
+        // 建两条线：
+        //   1) 主节点(nodeId) -> 附加等待节点(attachNodeId)
+        //   2) 附加等待节点(attachNodeId) -> 后续正常流转节点(targetNodeId)
         SequenceFlow sequenceFlow = buildBpmnSequenceFlow(nodeId, attachNodeId, null, null, null);
         SequenceFlow attachSequenceFlow = buildBpmnSequenceFlow(attachNodeId, targetNodeId, null, null, null);
         return CollUtil.newArrayList(sequenceFlow, attachSequenceFlow);
@@ -205,6 +225,13 @@ public class SimpleModelUtils {
      * @param targetNodeId 目标节点 ID
      */
     private static void traverseBranchNodeToBuildSequenceFlow(Process process, BpmSimpleModelNodeVO node, String targetNodeId) {
+        // 分支节点处理：根据不同网关类型构造多条出口连线，并确定这些分支最终如何汇合。
+        // 主要类型：
+        //  - CONDITION_BRANCH_NODE(排它)：只走满足条件的那一条 (若无匹配则走默认)
+        //  - PARALLEL_BRANCH_NODE(并行)：所有分支都同时执行，使用包容网关实现，出口条件强制为 true
+        //  - INCLUSIVE_BRANCH_NODE(包容)：满足条件的可同时走，若都不满足走默认
+        //  - ROUTER_BRANCH_NODE(路由)：类似排它但使用自定义路由配置 routerGroups
+        // branchEndNodeId：分支汇聚的“终点”节点 ID；不同类型决定不同生成策略。
         BpmSimpleModelNodeTypeEnum nodeType = BpmSimpleModelNodeTypeEnum.valueOf(node.getType());
         BpmSimpleModelNodeVO childNode = node.getChildNode();
         List<BpmSimpleModelNodeVO> conditionNodes = node.getConditionNodes();
@@ -227,6 +254,7 @@ public class SimpleModelUtils {
         if (nodeType == BpmSimpleModelNodeTypeEnum.ROUTER_BRANCH_NODE) {
             // 路由分支遍历
             for (BpmSimpleModelNodeVO.RouterSetting router : node.getRouterGroups()) {
+                // 每个路由配置都生成一条连线，条件表达式来源于 routerSetting
                 SequenceFlow sequenceFlow = RouteBranchNodeConvert.buildSequenceFlow(node.getId(), router);
                 process.addFlowElement(sequenceFlow);
             }
@@ -255,10 +283,12 @@ public class SimpleModelUtils {
         if (nodeType == BpmSimpleModelNodeTypeEnum.PARALLEL_BRANCH_NODE
                 || nodeType == BpmSimpleModelNodeTypeEnum.INCLUSIVE_BRANCH_NODE) {
             String nextNodeId = isValidNode(childNode) ? childNode.getId() : targetNodeId;
+            // 并行/包容：程序自动创建“汇聚”网关 (branchEndNodeId)，需要再接一条线到下一个节点
             SequenceFlow sequenceFlow = buildBpmnSequenceFlow(branchEndNodeId, nextNodeId);
             process.addFlowElement(sequenceFlow);
             // 4.2 如果是路由分支，需要连接后续节点为默认路由
         } else if (nodeType == BpmSimpleModelNodeTypeEnum.ROUTER_BRANCH_NODE) {
+            // 路由分支：再补一条默认路由的连线（无条件表达式）供未匹配时走
             SequenceFlow sequenceFlow = buildBpmnSequenceFlow(node.getId(), branchEndNodeId, node.getRouterDefaultFlowId(),
                     null, null);
             process.addFlowElement(sequenceFlow);
@@ -269,6 +299,8 @@ public class SimpleModelUtils {
     }
 
     private static SequenceFlow buildBpmnSequenceFlow(String sourceId, String targetId) {
+        // 构建最常见的连线（不带 id / 名称 / 条件表达式）。
+        // Flowable 会在未显式设置 id 时自动生成一个，但为了后续排查问题，有需要时可以传入自定义 id。
         return buildBpmnSequenceFlow(sourceId, targetId, null, null, null);
     }
 
@@ -277,6 +309,10 @@ public class SimpleModelUtils {
                                                       String conditionExpression) {
         Assert.notEmpty(sourceId, "sourceId 不能为空");
         Assert.notEmpty(targetId, "targetId 不能为空");
+        // 可选参数说明：
+        // sequenceFlowId: 手动指定连线 ID（可方便日志 & 排错）
+        // sequenceFlowName: 流程图里展示的名称（通常由用户自己在设计器里填写）
+        // conditionExpression: 条件表达式，网关分支上使用；格式通常是 ${...}
         // TODO @jason：如果 sequenceFlowId 不存在的时候，是不是要生成一个默认的 sequenceFlowId？ @芋艿： 貌似不需要,Flowable 会默认生成；TODO @jason：建议还是搞一个，主要是后续好排查问题。
         // TODO @jason：如果 name 不存在的时候，是不是要生成一个默认的 name？ @芋艿： 不需要生成默认的吧？ 这个会在流程图展示的， 一般用户填写的。不好生成默认的吧；TODO @jason：建议还是搞一个，主要是后续好排查问题。
         SequenceFlow sequenceFlow = new SequenceFlow(sourceId, targetId);
@@ -293,10 +329,14 @@ public class SimpleModelUtils {
     }
 
     public static boolean isValidNode(BpmSimpleModelNodeVO node) {
+        // 是否为一个“可用”的节点：不为空且已经分配了 id
+        // 说明：在前端构建流程时，某些占位/未配置完成的节点可能没有 id，这里直接视为无效跳过
         return node != null && node.getId() != null;
     }
 
     public static boolean isSequentialApproveNode(BpmSimpleModelNodeVO node) {
+        // 判断一个审批节点是否为『顺序审批』模式（SEQUENTIAL）
+        // 用于后续对多实例审批的特殊处理逻辑
         return BpmSimpleModelNodeTypeEnum.APPROVE_NODE.getType().equals(node.getType())
                 && BpmUserTaskApproveMethodEnum.SEQUENTIAL.getMethod().equals(node.getApproveMethod());
     }
