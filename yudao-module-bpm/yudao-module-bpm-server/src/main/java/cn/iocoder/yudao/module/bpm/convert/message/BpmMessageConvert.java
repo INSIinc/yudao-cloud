@@ -1,19 +1,8 @@
-// 声明当前类所在的包路径，遵循 Java 的包命名规范
 package cn.iocoder.yudao.module.bpm.convert.message;
-
-// 导入将被转换的目标类：SmsSendSingleToUserReqDTO，这是一个用于发送短信请求的数据传输对象（DTO）
 import cn.iocoder.yudao.module.system.api.sms.dto.send.SmsSendSingleToUserReqDTO;
-
-// 导入 MapStruct 的核心注解 @Mapper，用于标记这是一个 MapStruct 映射器接口
 import org.mapstruct.Mapper;
-
-// 导入 @Mapping 注解，用于指定字段之间的映射规则（比如忽略某个字段、自定义源字段到目标字段的映射等）
 import org.mapstruct.Mapping;
-
-// 导入 Mappers 工具类，用于在运行时获取 MapStruct 自动生成的映射器实现类的实例
 import org.mapstruct.factory.Mappers;
-
-// 导入 Java 标准库中的 Map，用于表示短信模板参数（键值对形式）
 import java.util.Map;
 
 /**

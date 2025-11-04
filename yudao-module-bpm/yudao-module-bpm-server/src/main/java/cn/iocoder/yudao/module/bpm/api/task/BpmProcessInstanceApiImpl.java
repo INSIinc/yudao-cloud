@@ -1,23 +1,11 @@
-// 声明当前类所属的包，用于组织项目结构
 package cn.iocoder.yudao.module.bpm.api.task;
-
-// 导入通用响应类，用于封装 API 返回结果（如成功/失败、数据等）
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
-// 导入创建流程实例的请求数据传输对象（DTO），用于接收前端传入的参数
 import cn.iocoder.yudao.module.bpm.api.task.dto.BpmProcessInstanceCreateReqDTO;
-// 导入流程实例的服务类，包含具体的业务逻辑（如启动流程）
 import cn.iocoder.yudao.module.bpm.service.task.BpmProcessInstanceService;
-// 导入 Spring 的参数校验注解，用于开启方法级别参数校验
 import org.springframework.validation.annotation.Validated;
-// 导入 Spring MVC 的注解，将该类标记为 REST 风格的控制器（即处理 HTTP 请求）
 import org.springframework.web.bind.annotation.RestController;
-
-// 导入资源注入注解（Jakarta 版本），用于注入 Spring 容器中的 Bean
 import jakarta.annotation.Resource;
-// 导入 Bean 校验注解（Jakarta 版本），用于对传入的 DTO 对象进行合法性校验
 import jakarta.validation.Valid;
-
-// 静态导入 CommonResult 的 success 方法，方便直接调用 success(...) 返回成功结果
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 
 /**
