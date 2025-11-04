@@ -19,38 +19,76 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 审批人自选策略实现类。
- * <p>
- * 该策略用于支持“由当前审批人手动选择下一节点审批人”的业务场景：
- * - 在流程启动或运行过程中，用户未预先指定下一节点处理人；
- * - 当前任务完成时，由当前审批人从前端界面选择下一节点的审批人；
- * - 所选审批人信息会作为流程变量存入流程实例；
- * - 本策略在 Flowable 引擎需要计算任务候选人（Candidate Users）时被调用，
- *   从流程变量中提取已选择的审批人列表并返回。
- * </p>
- * <p>
- * 注意：此类继承自 {@link AbstractBpmTaskCandidateDeptLeaderStrategy}，
- * 但实际并未使用部门领导相关逻辑，仅复用其基类结构（可能是历史原因或设计复用）。
- * 核心逻辑完全围绕“用户自选”展开。
- * </p>
+ * 审批人自选策略实现类
+ *
+ * ========== 初学者必读：这个类是做什么的？==========
+ *
+ * 在企业的审批流程中，有时候需要"人工选择下一个审批人"，而不是系统自动指定。
+ * 比如：张三提交了一个报销申请，领导李四审批时，可以选择让财务王五或者赵六来处理下一步。
+ *
+ * 这个类就是负责实现这种"审批人自选"功能的核心组件。
+ *
+ * ========== 工作流程说明 ==========
+ *
+ * 1. 【提交阶段】用户在前端界面选择下一节点的审批人（可以选一个或多个）
+ * 2. 【保存阶段】选择的审批人ID会被保存到流程变量中（类似于一个Map：节点ID -> 审批人列表）
+ * 3. 【执行阶段】当流程走到某个节点时，Flowable引擎会调用这个类
+ * 4. 【查找阶段】这个类从流程变量中找出该节点对应的审批人列表
+ * 5. 【返回阶段】把审批人ID列表返回给Flowable，由它创建待办任务
+ *
+ * ========== 为什么继承 AbstractBpmTaskCandidateDeptLeaderStrategy？==========
+ *
+ * 虽然这个类继承了"部门领导策略"的抽象类，但实际上并不使用部门领导的逻辑。
+ * 这样做是为了：
+ * - 复用父类中的一些通用方法和接口定义
+ * - 保持策略体系的统一性（所有策略都实现相同的接口）
  *
  * @author smallNorthLee
  */
-@Component
+@Component // 告诉Spring这是一个Bean，会自动创建实例并管理
 public class BpmTaskCandidateApproveUserSelectStrategy extends AbstractBpmTaskCandidateDeptLeaderStrategy {
 
     /**
-     * 注入流程实例服务，用于根据流程实例 ID 查询实例详情。
-     * 使用 {@link Lazy} 注解避免与其他 Bean（如策略注册器）产生循环依赖。
+     * 流程实例服务
+     *
+     * ========== 这个服务是做什么的？==========
+     *
+     * 这是一个工具类，用来查询流程实例的信息。
+     * 流程实例就是一次具体的审批流程，比如：
+     * - 张三在2024年1月5日提交的报销申请（这就是一个流程实例）
+     * - 李四在2024年1月6日提交的请假申请（这又是另一个流程实例）
+     *
+     * ========== 为什么要用 @Lazy？==========
+     *
+     * @Lazy 表示"懒加载"，即"用到的时候再初始化"。
+     * 这样做是为了避免"循环依赖"问题：
+     * - A类需要B类才能创建
+     * - B类需要A类才能创建
+     * - 结果谁也创建不了，程序启动就报错
+     *
+     * 使用@Lazy后，Spring会先创建一个"代理对象"，等真正调用时再初始化真实对象。
      */
-    @Resource
-    @Lazy
+    @Resource // 告诉Spring自动注入这个依赖
+    @Lazy // 延迟加载，避免循环依赖
     private BpmProcessInstanceService processInstanceService;
 
     /**
-     * 返回本策略对应的枚举值，用于在策略工厂中匹配和路由。
+     * 返回策略类型标识
      *
-     * @return 策略枚举 {@link BpmTaskCandidateStrategyEnum#APPROVE_USER_SELECT}
+     * ========== 这个方法是做什么的？==========
+     *
+     * 系统中可能有很多种审批人选择策略，比如：
+     * - 按部门选择
+     * - 按角色选择
+     * - 按职位选择
+     * - 审批人自选（就是当前这个类）
+     *
+     * 每个策略都有一个唯一的"标识符"（枚举值），用来区分不同的策略。
+     * 这个方法就是返回"审批人自选"这个策略的标识符。
+     *
+     * 当Flowable引擎需要计算审批人时，会根据这个标识符找到对应的策略类。
+     *
+     * @return 策略类型枚举：APPROVE_USER_SELECT（审批人自选）
      */
     @Override
     public BpmTaskCandidateStrategyEnum getStrategy() {
@@ -58,26 +96,44 @@ public class BpmTaskCandidateApproveUserSelectStrategy extends AbstractBpmTaskCa
     }
 
     /**
-     * 验证策略参数。
-     * <p>
-     * 由于“审批人自选”策略不依赖外部配置参数（如部门ID、角色编码等），
-     * 所有审批人信息都来自流程运行时变量，因此无需参数校验。
-     * </p>
+     * 验证策略参数是否合法
      *
-     * @param param 策略配置参数（本策略中不使用）
+     * ========== 为什么这个方法是空的？==========
+     *
+     * 不同的策略可能需要不同的配置参数，比如：
+     * - "按部门选择"策略需要配置部门ID
+     * - "按角色选择"策略需要配置角色编码
+     *
+     * 但是"审批人自选"策略不需要任何配置参数，因为：
+     * - 审批人是用户在运行时手动选择的
+     * - 选择结果保存在流程变量中
+     * - 不需要提前在系统中配置
+     *
+     * 所以这个方法什么也不做（但必须实现，因为父类要求）。
+     *
+     * @param param 策略参数（对于本策略来说用不到）
      */
     @Override
     public void validateParam(String param) {
-        // 无需校验参数
+        // 无需校验参数，因为审批人自选策略不依赖任何配置参数
     }
 
     /**
-     * 判断策略是否需要配置参数。
-     * <p>
-     * 本策略完全依赖流程变量中的动态选择结果，因此不需要在 BPMN 或流程定义中配置额外参数。
-     * </p>
+     * 判断这个策略是否需要配置参数
      *
-     * @return false，表示无需参数
+     * ========== 返回值的含义 ==========
+     *
+     * - true：表示这个策略需要配置参数（比如部门ID、角色编码等）
+     * - false：表示这个策略不需要配置参数
+     *
+     * "审批人自选"策略不需要预先配置参数，所以返回 false。
+     *
+     * ========== 这个方法有什么用？==========
+     *
+     * 前端界面会根据这个方法的返回值，决定是否显示"参数配置"输入框。
+     * 如果返回 false，前端就不会显示配置框，因为没必要。
+     *
+     * @return false - 不需要配置参数
      */
     @Override
     public boolean isParamRequired() {
@@ -85,82 +141,124 @@ public class BpmTaskCandidateApproveUserSelectStrategy extends AbstractBpmTaskCa
     }
 
     /**
-     * 在流程实际执行过程中，根据当前任务节点计算候选人用户ID集合。
-     * <p>
-     * 逻辑如下：
-     * 1. 通过 execution 获取当前流程实例 ID；
-     * 2. 查询完整的 {@link ProcessInstance} 对象；
-     * 3. 从流程实例的变量中提取“审批人自选映射”（activityId → List<userId>）；
-     * 4. 根据当前活动节点ID（execution.getCurrentActivityId()）查找对应的审批人列表；
-     * 5. 返回去重后的 LinkedHashSet（保持插入顺序）。
-     * </p>
-     * <p>
-     * 注意：此方法在任务创建时被 Flowable 调用，用于设置任务的候选人。
-     * </p>
+     * 【核心方法1】在任务创建时计算审批人列表
      *
-     * @param execution Flowable 执行上下文
-     * @param param     策略参数（本策略忽略）
-     * @return 审批人用户ID集合，若未选择则返回空集合
+     * ========== 这个方法什么时候被调用？==========
+     *
+     * 当流程执行到某个审批节点时，Flowable引擎需要创建一个"待办任务"。
+     * 创建任务前，引擎会调用这个方法，询问：这个任务应该分配给谁？
+     *
+     * ========== 方法的执行步骤 ==========
+     *
+     * 第1步：根据流程实例ID，查询完整的流程实例对象
+     * 第2步：从流程实例的变量中，提取"审批人自选映射表"
+     *       （这个映射表是前端传过来的，格式是：节点ID -> 审批人ID列表）
+     * 第3步：根据当前节点ID，从映射表中找出对应的审批人列表
+     * 第4步：把审批人ID列表转成 LinkedHashSet 返回
+     *       （LinkedHashSet 既能去重，又能保持插入顺序）
+     *
+     * ========== 参数说明 ==========
+     *
+     * @param execution Flowable执行上下文（包含流程实例ID、当前节点ID等信息）
+     * @param param     策略参数（本策略用不到，所以忽略）
+     *
+     * @return 审批人用户ID集合（LinkedHashSet确保顺序且不重复）
      */
     @Override
     public LinkedHashSet<Long> calculateUsersByTask(DelegateExecution execution, String param) {
-        // 获取流程实例
+        // 第1步：通过流程实例ID查询流程实例对象
+        // execution.getProcessInstanceId() 获取当前流程的实例ID（类似订单号）
         ProcessInstance processInstance = processInstanceService.getProcessInstance(execution.getProcessInstanceId());
+
+        // 断言：流程实例必须存在，否则抛出异常
+        // 这是一种防御性编程，确保数据完整性
         Assert.notNull(processInstance, "流程实例({})不能为空", execution.getProcessInstanceId());
 
-        // 从流程实例变量中提取“审批人自选”数据
+        // 第2步：从流程实例的变量中提取"审批人自选映射表"
+        // 这个映射表的结构：Map<节点ID, List<用户ID>>
+        // 例如：{"task1" -> [100, 200], "task2" -> [300]}
+        // 表示 task1 节点由用户100和200处理，task2 节点由用户300处理
         Map<String, List<Long>> approveUserSelectAssignees = FlowableUtils.getApproveUserSelectAssignees(processInstance);
+
+        // 断言：映射表必须存在，否则说明前端没有选择审批人
         Assert.notNull(approveUserSelectAssignees, "流程实例({}) 的下一个执行节点审批人不能为空",
                 execution.getProcessInstanceId());
 
-        // 若未获取到映射（理论上不应发生，因已断言非空，但防御性处理）
+        // 第3步：双重检查，虽然上面已经断言非空，但为了代码健壮性再检查一次
+        // （防御性编程：宁可多写几行代码，也不能让程序崩溃）
         if (approveUserSelectAssignees == null) {
-            return Sets.newLinkedHashSet();
+            return Sets.newLinkedHashSet(); // 返回空集合（不是null）
         }
 
-        // 获取当前活动节点对应的审批人列表
+        // 第4步：根据当前节点ID，从映射表中查找对应的审批人列表
+        // execution.getCurrentActivityId() 获取当前活动节点的ID
         List<Long> assignees = approveUserSelectAssignees.get(execution.getCurrentActivityId());
-        // 若有数据则转为 LinkedHashSet，否则返回空集合
+
+        // 第5步：如果找到了审批人列表，转成LinkedHashSet返回；否则返回空集合
+        // CollUtil.isNotEmpty() 判断集合是否非空（hutool工具类提供）
+        // LinkedHashSet 的优点：既能去重，又能保持顺序
         return CollUtil.isNotEmpty(assignees) ? new LinkedHashSet<>(assignees) : Sets.newLinkedHashSet();
     }
 
     /**
-     * 在流程预测（如流程图高亮、路径模拟）时，根据活动节点ID计算候选人。
-     * <p>
-     * 与 {@link #calculateUsersByTask} 不同，此方法不依赖运行中的 execution，
-     * 而是直接使用传入的 processVariables（流程变量快照）进行计算。
-     * </p>
-     * <p>
-     * 设计说明：
-     * - 流程预测时审批人可能尚未选择，因此允许返回空集合；
-     * - 前端在预测路径发现审批人为空时，应提示用户“请选择下一节点审批人”；
-     * - 此方法不抛异常，确保预测流程可正常进行。
-     * </p>
+     * 【核心方法2】在流程预测时计算审批人列表
      *
-     * @param bpmnModel             BPMN 模型（本策略未使用）
-     * @param activityId            当前活动节点ID
-     * @param param                 策略参数（忽略）
-     * @param startUserId           流程发起人ID（本策略未使用）
-     * @param processDefinitionId   流程定义ID（本策略未使用）
-     * @param processVariables      流程变量（包含审批人选择结果）
-     * @return 审批人用户ID集合，可能为空
+     * ========== 这个方法什么时候被调用？==========
+     *
+     * 这个方法用于"流程预测"或"流程模拟"场景，比如：
+     * - 用户想在提交申请前，预览一下整个审批流程会经过哪些人
+     * - 管理员想查看某个流程定义的审批路径
+     * - 前端需要高亮显示流程图中的节点
+     *
+     * 这时候流程还没真正运行，所以不能用 execution 对象。
+     * 只能根据传入的"流程变量快照"来模拟计算。
+     *
+     * ========== 与 calculateUsersByTask 的区别 ==========
+     *
+     * calculateUsersByTask：
+     * - 用于真实流程执行时
+     * - 通过 execution 对象获取实时数据
+     * - 如果找不到审批人会抛异常（因为流程不能继续）
+     *
+     * calculateUsersByActivity：
+     * - 用于流程预测/模拟时
+     * - 通过传入的 processVariables 参数获取数据
+     * - 如果找不到审批人返回空集合（允许预测继续）
+     *
+     * ========== 参数说明 ==========
+     *
+     * @param bpmnModel             BPMN流程模型（本策略用不到）
+     * @param activityId            要查询的活动节点ID
+     * @param param                 策略参数（本策略用不到）
+     * @param startUserId           流程发起人ID（本策略用不到）
+     * @param processDefinitionId   流程定义ID（本策略用不到）
+     * @param processVariables      流程变量快照（包含审批人选择结果）
+     *
+     * @return 审批人用户ID集合（可能为空，不会抛异常）
      */
     @Override
     public LinkedHashSet<Long> calculateUsersByActivity(BpmnModel bpmnModel, String activityId, String param,
                                                         Long startUserId, String processDefinitionId, Map<String, Object> processVariables) {
-        // 若流程变量为空，直接返回空集合
+        // 第1步：检查流程变量是否为空
+        // 如果为空，说明没有任何数据，直接返回空集合
         if (processVariables == null) {
-            return Sets.newLinkedHashSet();
+            return Sets.newLinkedHashSet(); // 返回空集合，不抛异常（允许预测继续）
         }
 
-        // 从流程变量中提取“审批人自选”映射
+        // 第2步：从流程变量中提取"审批人自选映射表"
+        // 这个映射表是前端在发起流程时传入的
         Map<String, List<Long>> approveUserSelectAssignees = FlowableUtils.getApproveUserSelectAssignees(processVariables);
+
+        // 如果映射表为空，说明用户还没选择审批人，返回空集合
+        // （在预测场景下，这是允许的，前端会提示用户"请选择审批人"）
         if (approveUserSelectAssignees == null) {
             return Sets.newLinkedHashSet();
         }
 
-        // 获取指定活动节点的审批人列表
+        // 第3步：根据指定的节点ID，从映射表中查找审批人列表
         List<Long> assignees = approveUserSelectAssignees.get(activityId);
+
+        // 第4步：如果找到了审批人，转成LinkedHashSet返回；否则返回空集合
         return CollUtil.isNotEmpty(assignees) ? new LinkedHashSet<>(assignees) : Sets.newLinkedHashSet();
     }
 
