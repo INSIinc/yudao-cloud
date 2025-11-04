@@ -310,16 +310,22 @@ public class BpmTaskServiceImpl implements BpmTaskService {
 
     @Override
     public Task validateTask(Long userId, String taskId) {
+        // 1. 首先检查任务是否存在，如果不存在会抛出异常
         Task task = validateTaskExist(taskId);
-        // 为什么判断 assignee 非空的情况下？
-        // 例如说：在审批人为空时，我们会有“自动审批通过”的策略，此时 userId 为 null，允许通过
-        if (StrUtil.isNotBlank(task.getAssignee())
+
+        // 2. 判断任务是否指定了具体的处理人（assignee）
+        //    - 如果 assignee 为空（比如某些自动审批任务），说明任何人都可以操作，
+        //      或系统会自动处理（如自动审批通过），此时 userId 可能为 null，也允许继续
+        //    - 如果 assignee 不为空，则必须确保当前操作用户（userId）就是该任务指定的处理人
+        if (StrUtil.isNotBlank(task.getAssignee())  // assignee 有值（不是空或空白字符串）
                 && ObjectUtil.notEqual(userId, NumberUtils.parseLong(task.getAssignee()))) {
+            // 如果当前用户不是任务指定的处理人，则抛出“无权操作此任务”的异常
             throw exception(TASK_OPERATE_FAIL_ASSIGN_NOT_SELF);
         }
+
+        // 3. 验证通过，返回该任务对象
         return task;
     }
-
     private Task validateTaskExist(String id) {
         Task task = getTask(id);
         if (task == null) {
@@ -1014,141 +1020,213 @@ public class BpmTaskServiceImpl implements BpmTaskService {
         taskService.delegateTask(taskId, reqVO.getDelegateUserId().toString());
         // 补充说明：委托不单独设置状态。如果需要，可通过 Task 的 DelegationState 字段，判断是否为 DelegationState.PENDING 委托中
     }
-
     @Override
     public void transferTask(Long userId, BpmTaskTransferReqVO reqVO) {
         String taskId = reqVO.getId();
-        // 1.1 校验任务
+
+        // 1.1 校验当前任务是否存在，并且当前用户是否有权限操作该任务
         Task task = validateTask(userId, reqVO.getId());
-        if (task.getAssignee().equals(reqVO.getAssigneeUserId().toString())) { // 校验当前审批人和被转派人不是同一人
+
+        // 判断当前任务的审批人（assignee）是否和要转派的人是同一个，如果是则不允许转派（自己不能转给自己）
+        if (task.getAssignee().equals(reqVO.getAssigneeUserId().toString())) {
             throw exception(TASK_TRANSFER_FAIL_USER_REPEAT);
         }
-        // 1.2 校验目标用户存在
+
+        // 1.2 校验目标用户（即要转派给谁）是否存在
         AdminUserRespDTO assigneeUser = adminUserApi.getUser(reqVO.getAssigneeUserId()).getCheckedData();
         if (assigneeUser == null) {
             throw exception(TASK_TRANSFER_FAIL_USER_NOT_EXISTS);
         }
 
-        // 2. 添加委托意见
+        // 2. 添加一条“任务转派”的评论，记录是谁转给了谁，以及转派原因（用于流程历史追踪）
         AdminUserRespDTO currentUser = adminUserApi.getUser(userId).getCheckedData();
-        taskService.addComment(taskId, task.getProcessInstanceId(), BpmCommentTypeEnum.TRANSFER.getType(),
-                BpmCommentTypeEnum.TRANSFER.formatComment(currentUser.getNickname(), assigneeUser.getNickname(), reqVO.getReason()));
+        taskService.addComment(
+                taskId,
+                task.getProcessInstanceId(),
+                BpmCommentTypeEnum.TRANSFER.getType(),
+                BpmCommentTypeEnum.TRANSFER.formatComment(
+                        currentUser.getNickname(),      // 当前操作人昵称
+                        assigneeUser.getNickname(),    // 被转派人昵称
+                        reqVO.getReason()              // 转派原因
+                )
+        );
 
-        // 3.1 设置任务所有人 (owner) 为原任务的处理人 (assignee)
-        // 特殊：如果已经被转派（owner 非空），则不需要更新 owner：https://gitee.com/zhijiantianya/yudao-cloud/issues/ICJ153
+        // 3.1 设置任务的“所有人”（owner）为原来的审批人（assignee）
+        // 注意：如果任务已经被转派过（即 owner 已经有值），就不再修改 owner，避免覆盖历史信息
+        // 参考：https://gitee.com/zhijiantianya/yudao-cloud/issues/ICJ153
         if (StrUtil.isEmpty(task.getOwner())) {
             taskService.setOwner(taskId, task.getAssignee());
         }
-        // 3.2 执行转派（审批人），将任务转派给 assigneeUser
-        // 委托（ delegate）和转派（transfer）的差别，就在这块的调用！！！！
+
+        // 3.2 真正执行任务转派：将任务的当前审批人（assignee）更新为新指定的用户
+        // 注意：这里用的是 setAssignee（转派），而不是 delegateTask（委托），两者语义不同！
         taskService.setAssignee(taskId, reqVO.getAssigneeUserId().toString());
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void moveTaskToEnd(String processInstanceId, String reason) {
+        // 步骤0：获取当前流程实例中所有还在运行的任务（即尚未完成或取消的任务）
         List<Task> taskList = getRunningTaskListByProcessInstanceId(processInstanceId, null, null);
+
+        // 如果没有正在运行的任务，说明流程已经结束，无需操作，直接返回
         if (CollUtil.isEmpty(taskList)) {
             return;
         }
 
-        // 1. 其它未结束的任务，直接取消
-        // 疑问：为什么不通过 updateTaskStatusWhenCanceled 监听取消，而是直接提前调用呢？
-        // 回答：详细见 updateTaskStatusWhenCanceled 的方法，加签的场景
+        // 步骤1：逐个取消所有未完成的任务
+        // 为什么需要手动取消？因为在“加签”等特殊场景下，任务可能由系统自动创建，
+        // 如果不提前取消，直接跳转会引发状态不一致的问题
         taskList.forEach(task -> {
+            // 从任务的本地变量中读取当前任务的状态（比如：待办、已取消、已完成等）
             Integer otherTaskStatus = (Integer) task.getTaskLocalVariables().get(BpmnVariableConstants.TASK_VARIABLE_STATUS);
+
+            // 如果该任务已经是结束状态（例如已完成或已取消），就跳过，不再处理
             if (BpmTaskStatusEnum.isEndStatus(otherTaskStatus)) {
                 return;
             }
+
+            // 调用取消任务的方法，触发任务取消逻辑（比如记录日志、更新状态等）
             processTaskCanceled(task.getId());
         });
 
-        // 2. 终止流程
+        // 步骤2：将所有正在运行的任务（对应流程中的活动节点）一次性跳转到流程的结束节点
+        // 首先，根据任务获取对应的流程定义模型（BPMN 文件的内存表示）
         BpmnModel bpmnModel = modelService.getBpmnModelByDefinitionId(taskList.get(0).getProcessDefinitionId());
+
+        // 收集所有要跳转的“起点”节点ID（即当前活跃的任务节点）
         List<String> activityIds = CollUtil.newArrayList(convertSet(taskList, Task::getTaskDefinitionKey));
+
+        // 从流程模型中找到唯一的“结束节点”（EndEvent）
         EndEvent endEvent = BpmnModelUtils.getEndEvent(bpmnModel);
-        Assert.notNull(endEvent, "结束节点不能为空");
+        Assert.notNull(endEvent, "流程定义中必须包含一个结束节点，否则无法跳转！");
+
+        // 执行跳转：把 activityIds 中的所有活动节点，直接移动到结束节点，从而快速结束流程
         runtimeService.createChangeActivityStateBuilder()
                 .processInstanceId(processInstanceId)
                 .moveActivityIdsToSingleActivityId(activityIds, endEvent.getId())
                 .changeState();
 
-        // 3. 特殊：如果跳转到 EndEvent 流程还未结束， 执行 deleteProcessInstance 方法
-        // TODO 芋艿：目前发现并行分支情况下，会存在这个情况，后续看看有没更好的方案；
+        // 步骤3：兜底处理——防止并行流程中出现“残留执行流”
+        // 有时候，即使跳转到了结束节点，流程实例仍未完全结束（比如存在多个并行分支）
+        // 这时需要强制删除整个流程实例，确保干净退出
         List<Execution> executions = runtimeService.createExecutionQuery().processInstanceId(processInstanceId).list();
         if (CollUtil.isNotEmpty(executions)) {
-            log.warn("[moveTaskToEnd][执行跳转到 EndEvent 后, 流程实例未结束，强制执行 deleteProcessInstance 方法]");
+            // 记录警告日志，说明发生了异常情况
+            log.warn("[moveTaskToEnd] 跳转到结束节点后，流程实例仍未结束，强制删除流程实例");
+            // 强制删除流程实例，并附上删除原因（如“用户手动结束”）
             runtimeService.deleteProcessInstance(processInstanceId, reason);
         }
     }
-
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createSignTask(Long userId, BpmTaskSignCreateReqVO reqVO) {
-        // 1. 获取和校验任务
+        // 1. 获取并校验原始任务是否允许执行“加签”操作（比如当前用户是否有权限）
         TaskEntityImpl taskEntity = validateTaskCanCreateSign(userId, reqVO);
+
+        // 获取要加签的用户列表，并校验这些用户是否存在
         List<AdminUserRespDTO> userList = adminUserApi.getUserList(reqVO.getUserIds()).getCheckedData();
         if (CollUtil.isEmpty(userList)) {
             throw exception(TASK_SIGN_CREATE_USER_NOT_EXIST);
         }
 
-        // 2. 处理当前任务
-        // 2.1 开启计数功能，主要用于为了让表 ACT_RU_TASK 中的 SUB_TASK_COUNT_ 字段记录下总共有多少子任务，后续可能有用
+        // 2. 修改原始任务状态，为加签做准备
+        // 2.1 启用子任务计数功能（会在数据库 ACT_RU_TASK 表中记录子任务数量，便于后续处理）
         taskEntity.setCountEnabled(true);
-        // 2.2 向前加签，设置 owner，置空 assign。等子任务都完成后，再调用 resolveTask 重新将 owner 设置为 assign
-        // 原因是：不能和向前加签的子任务一起审批，需要等前面的子任务都完成才能审批
+
+        // 2.2 如果是“向前加签”（即新加的人先审批，原审批人等他们完成后才能继续）
         if (reqVO.getType().equals(BpmTaskSignTypeEnum.BEFORE.getType())) {
+            // 把原审批人设为“任务所有人”（owner），表示他暂时不处理，等子任务完成
             taskEntity.setOwner(taskEntity.getAssignee());
+            // 清空当前审批人（assignee），表示任务暂停，等待子任务完成
             taskEntity.setAssignee(null);
         }
-        // 2.4 记录加签方式，完成任务时需要用到判断
+
+        // 2.4 记录加签类型（向前 or 向后），后续完成任务时需要根据类型做不同处理
         taskEntity.setScopeType(reqVO.getType());
-        // 2.5 保存当前任务修改后的值
+
+        // 2.5 保存对原始任务的修改
         taskService.saveTask(taskEntity);
-        // 2.6 更新 task 状态为 WAIT，只有在向前加签的时候
+
+        // 2.6 如果是向前加签，把原始任务状态设为“等待”（WAIT），表示暂停
         if (reqVO.getType().equals(BpmTaskSignTypeEnum.BEFORE.getType())) {
             updateTaskStatus(taskEntity.getId(), BpmTaskStatusEnum.WAIT.getStatus());
         }
 
-        // 3. 创建加签任务
+        // 3. 为每个加签用户创建新的子任务
         createSignTaskList(convertList(reqVO.getUserIds(), String::valueOf), taskEntity);
 
-        // 4. 记录加签的评论到 task 任务
+        // 4. 添加一条“加签”评论，记录操作人、加签类型、加签人员和原因（用于审计和查看）
         AdminUserRespDTO currentUser = adminUserApi.getUser(userId).getCheckedData();
-        String comment = StrUtil.format(BpmCommentTypeEnum.ADD_SIGN.getComment(),
-                currentUser.getNickname(), BpmTaskSignTypeEnum.nameOfType(reqVO.getType()),
-                String.join(",", convertList(userList, AdminUserRespDTO::getNickname)), reqVO.getReason());
-        taskService.addComment(reqVO.getId(), taskEntity.getProcessInstanceId(), BpmCommentTypeEnum.ADD_SIGN.getType(), comment);
+        String comment = StrUtil.format(
+                BpmCommentTypeEnum.ADD_SIGN.getComment(),
+                currentUser.getNickname(),                             // 操作人昵称
+                BpmTaskSignTypeEnum.nameOfType(reqVO.getType()),       // 加签类型：向前/向后
+                String.join(",", convertList(userList, AdminUserRespDTO::getNickname)), // 加签人昵称列表
+                reqVO.getReason()                                      // 加签原因
+        );
+        taskService.addComment(
+                reqVO.getId(),
+                taskEntity.getProcessInstanceId(),
+                BpmCommentTypeEnum.ADD_SIGN.getType(),
+                comment
+        );
     }
 
     /**
-     * 校验任务是否可以加签，主要校验加签类型是否一致：
+     * 校验当前任务是否允许创建加签（即添加额外审批人）。
+     * 加签有两种类型：向前加签（让某人提前审批）和向后加签（让某人后续审批）。
+     * 校验规则如下：
      * <p>
-     * 1. 如果存在“向前加签”的任务，则不能“向后加签”
-     * 2. 如果存在“向后加签”的任务，则不能“向前加签”
+     * 1. 同一个任务不能同时存在“向前加签”和“向后加签”——一旦已有某种类型的加签，新的加签必须是同一类型。
+     * 2. 对于同一个流程节点（即相同 taskDefinitionKey），不能重复添加已经参与审批（或作为加签人/所有者）的用户。
      *
-     * @param userId 当前用户 ID
-     * @param reqVO  请求参数，包含任务 ID 和加签类型
-     * @return 当前任务
+     * @param userId 当前操作用户的 ID（通常是发起加签的人）
+     * @param reqVO  包含加签请求信息的对象，包括：要加签的原始任务 ID 和加签类型（向前或向后）
+     * @return 校验通过后的原始任务实体（TaskEntityImpl 类型）
      */
     private TaskEntityImpl validateTaskCanCreateSign(Long userId, BpmTaskSignCreateReqVO reqVO) {
+        // 第一步：校验当前用户是否有权限操作该任务（复用已有校验逻辑），并获取任务详情
         TaskEntityImpl taskEntity = (TaskEntityImpl) validateTask(userId, reqVO.getId());
-        // 向前加签和向后加签不能同时存在
+
+        // 第二步：检查加签类型是否冲突
+        // 如果该任务之前已经被加签过（scopeType 不为 null），那么新请求的加签类型必须和原来一致
         if (taskEntity.getScopeType() != null
                 && ObjectUtil.notEqual(taskEntity.getScopeType(), reqVO.getType())) {
+            // 类型不一致，抛出错误：比如原来是“向前加签”，现在又试图“向后加签”
             throw exception(TASK_SIGN_CREATE_TYPE_ERROR,
-                    BpmTaskSignTypeEnum.nameOfType(taskEntity.getScopeType()), BpmTaskSignTypeEnum.nameOfType(reqVO.getType()));
+                    BpmTaskSignTypeEnum.nameOfType(taskEntity.getScopeType()),
+                    BpmTaskSignTypeEnum.nameOfType(reqVO.getType()));
         }
 
-        // 同一个 key 的任务，审批人不重复
-        List<Task> taskList = taskService.createTaskQuery().processInstanceId(taskEntity.getProcessInstanceId())
-                .taskDefinitionKey(taskEntity.getTaskDefinitionKey()).list();
-        List<Long> currentAssigneeList = convertListByFlatMap(taskList, task -> // 需要考虑 owner 的情况，因为向后加签时，它暂时没 assignee 而是 owner
-                Stream.of(NumberUtils.parseLong(task.getAssignee()), NumberUtils.parseLong(task.getOwner())));
+        // 第三步：防止重复添加审批人
+        // 查询当前流程实例中，所有具有相同任务定义 key（即同一审批节点）的任务
+        List<Task> taskList = taskService.createTaskQuery()
+                .processInstanceId(taskEntity.getProcessInstanceId())
+                .taskDefinitionKey(taskEntity.getTaskDefinitionKey())
+                .list();
+
+        // 收集这些任务中已有的审批人（assignee）和所有者（owner）的用户 ID
+        // 注意：向后加签的任务可能还没有 assignee（审批人），但会设置 owner（所有者），所以两者都要检查
+        List<Long> currentAssigneeList = convertListByFlatMap(taskList, task ->
+                Stream.of(
+                        NumberUtils.parseLong(task.getAssignee()), // 当前审批人
+                        NumberUtils.parseLong(task.getOwner())     // 加签任务的所有者（可能用于向后加签）
+                )
+        );
+
+        // 检查请求中要加签的用户是否已经在上述列表中（即是否重复）
         if (CollUtil.containsAny(currentAssigneeList, reqVO.getUserIds())) {
-            List<AdminUserRespDTO> userList = adminUserApi.getUserList(CollUtil.intersection(currentAssigneeList, reqVO.getUserIds())).getCheckedData();
-            throw exception(TASK_SIGN_CREATE_USER_REPEAT, String.join(",", convertList(userList, AdminUserRespDTO::getNickname)));
+            // 如果有重复，获取这些重复用户的昵称，用于提示错误信息
+            List<AdminUserRespDTO> userList = adminUserApi.getUserList(
+                    CollUtil.intersection(currentAssigneeList, reqVO.getUserIds())
+            ).getCheckedData();
+            // 抛出“用户已存在”异常，并列出重复用户的昵称
+            throw exception(TASK_SIGN_CREATE_USER_REPEAT,
+                    String.join(",", convertList(userList, AdminUserRespDTO::getNickname)));
         }
+
+        // 所有校验通过，返回任务实体
         return taskEntity;
     }
 
@@ -1172,63 +1250,119 @@ public class BpmTaskServiceImpl implements BpmTaskService {
     }
 
     /**
-     * 创建加签子任务
+     * 创建一个“加签”子任务（即在原有审批流程中临时插入的新审批人任务）。
+     * <p>
+     * 加签分为两种类型：
+     * - 向前加签（BEFORE）：新审批人必须先审批，原任务才能继续。
+     * - 向后加签（AFTER）：原任务审批完成后，再由新加的人审批。
+     * <p>
+     * 本方法会根据父任务的加签类型，正确设置子任务的执行人（assignee）或所有者（owner），
+     * 并控制子任务的初始状态。
      *
-     * @param parentTask 父任务
-     * @param assignee   子任务的执行人
+     * @param parentTask 原始的父任务（即被加签的任务）
+     * @param assignee   要加签的用户 ID（即新审批人的 ID，字符串格式）
      */
     private void createSignTask(TaskEntityImpl parentTask, String assignee) {
-        // 1. 生成子任务
+        // 第一步：创建一个新的子任务（作为加签任务）
+        // 使用 UUID 生成唯一任务 ID
         TaskEntityImpl task = (TaskEntityImpl) taskService.newTask(IdUtil.fastSimpleUUID());
+        // 复制父任务的大部分属性（如流程实例 ID、任务定义 key、业务 key 等）到子任务
         BpmTaskConvert.INSTANCE.copyTo(parentTask, task);
 
-        // 2.1 向前加签，设置审批人
+        // 第二步：根据加签类型，决定如何分配这个子任务
         if (BpmTaskSignTypeEnum.BEFORE.getType().equals(parentTask.getScopeType())) {
-            task.setAssignee(assignee);
-            // 2.2 向后加签，设置 owner 不设置 assignee 是因为不能同时审批，需要等父任务完成
+            // 情况1：向前加签
+            // 子任务立即分配给指定用户，该用户需要先审批
+            task.setAssignee(assignee); // 设置执行人（审批人）
         } else {
-            task.setOwner(assignee);
+            // 情况2：向后加签
+            // 子任务暂时不分配给任何人执行（不设 assignee），
+            // 而是把 assignee 设为 owner（所有者），表示“将来要由这个人处理”
+            // 这样可以避免和父任务同时被处理
+            task.setOwner(assignee); // 设置所有者，等父任务完成后才激活
         }
-        // 2.3 保存子任务
+
+        // 第三步：将子任务保存到数据库
         taskService.saveTask(task);
 
-        // 3. 向后前签，设置子任务的状态为 WAIT，因为需要等父任务审批完
+        // 第四步：如果是向后加签，需要将子任务状态设为“等待中”（WAIT）
+        // 因为此时父任务还没完成，子任务不能被处理
         if (BpmTaskSignTypeEnum.AFTER.getType().equals(parentTask.getScopeType())) {
+            // 更新子任务状态为 WAIT，防止用户提前操作
             updateTaskStatus(task.getId(), BpmTaskStatusEnum.WAIT.getStatus());
         }
+
+        // 注意：向前加签的子任务默认是“待处理”状态，可立即审批，无需额外设置状态
     }
 
+    /**
+     * 删除一个加签任务（即“减签”操作）。
+     * <p>
+     * 减签是指将之前通过“加签”添加的额外审批人任务移除。
+     * 该操作会：
+     * - 校验任务是否可以被删除（必须是加签产生的子任务）
+     * - 找到要删除的审批人（可能是 assignee 或 owner）
+     * - 同时删除该任务及其所有下级子任务（比如加签任务又被加签的情况）
+     * - 将这些任务标记为“已取消”
+     * - 在父任务上记录操作日志
+     * - 触发父任务的后续处理（比如继续审批流程）
+     *
+     * @param userId 当前执行减签操作的用户 ID
+     * @param reqVO  请求参数，包含要删除的加签任务 ID
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class) // 整个操作要么全部成功，要么全部回滚，保证数据一致性
     @SuppressWarnings("DataFlowIssue")
     public void deleteSignTask(Long userId, BpmTaskSignDeleteReqVO reqVO) {
-        // 1.1 校验 task 可以被减签
+        // 第一步：校验这个任务是否允许被“减签”
+        // validateTaskCanSignDelete 会检查该任务是否是加签产生的、状态是否允许删除等
         Task task = validateTaskCanSignDelete(reqVO.getId());
-        // 1.2 校验取消人存在
+
+        // 第二步：确定这个被删除的任务原本是分配给谁的（即“被减签的人”）
         AdminUserRespDTO cancelUser = null;
+
+        // 优先看 assignee（实际审批人），例如向前加签的任务会有 assignee
         if (StrUtil.isNotBlank(task.getAssignee())) {
             cancelUser = adminUserApi.getUser(NumberUtils.parseLong(task.getAssignee())).getCheckedData();
         }
+
+        // 如果没有 assignee，再看 owner（所有者），例如向后加签的任务可能只有 owner
         if (cancelUser == null && StrUtil.isNotBlank(task.getOwner())) {
             cancelUser = adminUserApi.getUser(NumberUtils.parseLong(task.getOwner())).getCheckedData();
         }
+
+        // 如果连 owner 和 assignee 都没有，说明数据异常，直接报错
         Assert.notNull(cancelUser, "任务中没有所有者和审批人，数据错误");
 
-        // 2.1 获得子任务列表，包括子任务的子任务
+        // 第三步：获取这个任务及其所有“后代子任务”（比如：A 加签了 B，B 又加签了 C，那么删除 A 时也要删 B 和 C）
         List<Task> childTaskList = getAllChildTaskList(task);
-        childTaskList.add(task);
-        // 2.2 更新子任务为已取消
+        childTaskList.add(task); // 把当前任务自己也加入列表
+
+        // 第四步：将所有这些任务的状态统一改为“已取消”，并记录取消原因
         String cancelReason = StrUtil.format("任务被取消，原因：由于[{}]操作[减签]，", cancelUser.getNickname());
-        childTaskList.forEach(childTask -> updateTaskStatusAndReason(childTask.getId(), BpmTaskStatusEnum.CANCEL.getStatus(), cancelReason));
-        // 2.3 删除任务和所有子任务
+        childTaskList.forEach(childTask ->
+                updateTaskStatusAndReason(
+                        childTask.getId(),
+                        BpmTaskStatusEnum.CANCEL.getStatus(), // 状态设为“已取消”
+                        cancelReason
+                )
+        );
+
+        // 第五步：从流程引擎中彻底删除这些任务（数据库中移除）
         taskService.deleteTasks(convertList(childTaskList, Task::getId));
 
-        // 3. 记录日志到父任务中。先记录日志是因为，通过 handleParentTask 方法之后，任务可能被完成了，并且不存在了，会报异常，所以先记录
-        AdminUserRespDTO user = adminUserApi.getUser(userId).getCheckedData();
-        taskService.addComment(task.getParentTaskId(), task.getProcessInstanceId(), BpmCommentTypeEnum.SUB_SIGN.getType(),
-                StrUtil.format(BpmCommentTypeEnum.SUB_SIGN.getComment(), user.getNickname(), cancelUser.getNickname()));
+        // 第六步：在父任务上添加一条操作日志（说明谁对谁执行了减签）
+        // 注意：必须在 handleParentTask 之前记录！
+        // 因为 handleParentTask 可能会完成或删除父任务，导致后续无法添加评论（会报错）
+        AdminUserRespDTO user = adminUserApi.getUser(userId).getCheckedData(); // 当前操作人
+        taskService.addComment(
+                task.getParentTaskId(),           // 父任务 ID
+                task.getProcessInstanceId(),      // 所属流程实例
+                BpmCommentTypeEnum.SUB_SIGN.getType(), // 评论类型：减签
+                StrUtil.format(BpmCommentTypeEnum.SUB_SIGN.getComment(), user.getNickname(), cancelUser.getNickname())
+        );
 
-        // 4. 处理当前任务的父任务
+        // 第七步：检查并处理父任务（比如：如果父任务的所有加签都处理完了，可能需要继续推进流程）
         handleParentTaskIfSign(task.getParentTaskId());
     }
 
@@ -1236,62 +1370,121 @@ public class BpmTaskServiceImpl implements BpmTaskService {
     public void copyTask(Long userId, BpmTaskCopyReqVO reqVO) {
         processInstanceCopyService.createProcessInstanceCopy(reqVO.getCopyUserIds(), reqVO.getReason(), reqVO.getId());
     }
-
+    /**
+     * 撤回一个已提交的审批任务。
+     * <p>
+     * 用户在完成某个审批后，如果发现填错了或想修改，可以“撤回”该任务。
+     * 撤回意味着：
+     * - 取消后续已经生成但还未完成的审批任务
+     * - 把流程“跳回”到用户刚才审批的那个节点，让用户重新处理
+     * <p>
+     * 注意：撤回有严格限制，比如：
+     * - 只能撤回自己审批过的任务
+     * - 后续节点必须还没被其他人审批（不能“时光倒流”）
+     * - 流程定义必须明确允许撤回
+     *
+     * @param userId   当前用户 ID（发起撤回的人）
+     * @param taskId   要撤回的历史任务 ID（即用户之前完成的那次审批）
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class) // 整个操作必须原子执行：成功就全成功，失败就全部回滚
     public void withdrawTask(Long userId, String taskId) {
-        // 1.1 查询本人已办任务
+
+        // =============== 第一步：校验是否可以撤回 ===============
+
+        // 1.1 查询“当前用户”是否真的完成过这个任务（必须是本人操作过的已完成任务）
         HistoricTaskInstance taskInstance = historyService.createHistoricTaskInstanceQuery()
-                .taskId(taskId).taskAssignee(userId.toString()).finished().singleResult();
+                .taskId(taskId)                // 指定任务 ID
+                .taskAssignee(userId.toString()) // 必须是当前用户审批的
+                .finished()                    // 必须是已完成的任务（已办事项）
+                .singleResult();               // 只允许一个结果
+
         if (ObjUtil.isNull(taskInstance)) {
-            throw exception(TASK_WITHDRAW_FAIL_TASK_NOT_EXISTS);
+            throw exception(TASK_WITHDRAW_FAIL_TASK_NOT_EXISTS); // 任务不存在或不是你办的
         }
-        // 1.2 校验流程是否结束
+
+        // 1.2 检查整个流程是否还在运行中（如果流程已经结束，就不能撤回了）
         ProcessInstance processInstance = processInstanceService.getProcessInstance(taskInstance.getProcessInstanceId());
         if (ObjUtil.isNull(processInstance)) {
-            throw exception(TASK_WITHDRAW_FAIL_PROCESS_NOT_RUNNING);
+            throw exception(TASK_WITHDRAW_FAIL_PROCESS_NOT_RUNNING); // 流程已结束
         }
-        // 1.3 判断此流程是否允许撤回
+
+        // 1.3 检查这个流程是否允许“撤回”功能（需要在流程设计时开启）
         BpmProcessDefinitionInfoDO processDefinitionInfo = bpmProcessDefinitionService.getProcessDefinitionInfo(
                 processInstance.getProcessDefinitionId());
         if (ObjUtil.isNull(processDefinitionInfo) || !Boolean.TRUE.equals(processDefinitionInfo.getAllowWithdrawTask())) {
-            throw exception(TASK_WITHDRAW_FAIL_NOT_ALLOW);
+            throw exception(TASK_WITHDRAW_FAIL_NOT_ALLOW); // 流程不允许撤回
         }
-        // 1.4 判断下一个节点是否被审批过，如果是则无法撤回
+
+        // 1.4 找出“当前任务节点”的下一个审批节点有哪些
         BpmnModel bpmnModel = modelService.getBpmnModelByDefinitionId(taskInstance.getProcessDefinitionId());
+        // 从 BPMN 模型中找到用户刚才审批的那个节点（UserTask）
         UserTask userTask = (UserTask) BpmnModelUtils.getFlowElementById(bpmnModel, taskInstance.getTaskDefinitionKey());
+        // 获取该节点后面连接的所有“用户任务”（即下一个或多个审批人节点）
         List<String> nextUserTaskKeys = convertList(BpmnModelUtils.getNextUserTasks(userTask), UserTask::getId);
+
         if (CollUtil.isEmpty(nextUserTaskKeys)) {
-            throw exception(TASK_WITHDRAW_FAIL_NEXT_TASK_NOT_ALLOW);
+            throw exception(TASK_WITHDRAW_FAIL_NEXT_TASK_NOT_ALLOW); // 没有下一个节点，无法撤回（比如已经是最后一个节点）
         }
-        // TODO @芋艿：是否选择升级flowable版本解决taskCreatedAfter、taskCreatedBefore问题，升级7.1.0可以；包括 todo 和 done 那边的查询哇？？？ 是的！
+
+        // 1.5 检查“下一个节点”的任务是否已经被别人完成了
+        // 只有在“当前任务完成之后”创建的后续任务才算（用 taskCreatedAfter 过滤）
         long nextUserTaskFinishedCount = historyService.createHistoricTaskInstanceQuery()
-                .processInstanceId(processInstance.getProcessInstanceId()).taskDefinitionKeys(nextUserTaskKeys)
-                .taskCreatedAfter(taskInstance.getEndTime()).finished().count();
+                .processInstanceId(processInstance.getProcessInstanceId())
+                .taskDefinitionKeys(nextUserTaskKeys)
+                .taskCreatedAfter(taskInstance.getEndTime()) // 只查当前任务完成后产生的后续任务
+                .finished() // 已完成的
+                .count();
+
         if (nextUserTaskFinishedCount > 0) {
-            throw exception(TASK_WITHDRAW_FAIL_NEXT_TASK_NOT_ALLOW);
-        }
-        // 1.5 获取需要撤回的运行任务
-        List<Task> runningTasks = taskService.createTaskQuery().processInstanceId(processInstance.getProcessInstanceId())
-                .taskDefinitionKeys(nextUserTaskKeys).active().list();
-        if (CollUtil.isEmpty(runningTasks)) {
+            // 如果有后续任务已经审批完成，就不能撤回（否则会破坏流程一致性）
             throw exception(TASK_WITHDRAW_FAIL_NEXT_TASK_NOT_ALLOW);
         }
 
-        // 2.1 取消当前任务
+        // 1.6 查询当前正在运行的“下一个节点”任务（即已经生成但还没审批的任务）
+        List<Task> runningTasks = taskService.createTaskQuery()
+                .processInstanceId(processInstance.getProcessInstanceId())
+                .taskDefinitionKeys(nextUserTaskKeys)
+                .active() // 只查活跃（未完成）的任务
+                .list();
+
+        if (CollUtil.isEmpty(runningTasks)) {
+            // 如果连运行中的任务都没有，说明流程可能卡住了，也无法撤回
+            throw exception(TASK_WITHDRAW_FAIL_NEXT_TASK_NOT_ALLOW);
+        }
+
+        // =============== 第二步：执行撤回操作 ===============
+
+        // 2.1 先把所有“下一个节点”的任务标记为“已取消”，并添加撤回日志
         List<String> withdrawExecutionIds = new ArrayList<>();
         for (Task task : runningTasks) {
-            // 标记撤回任务为取消
-            taskService.addComment(task.getId(), taskInstance.getProcessInstanceId(), BpmCommentTypeEnum.CANCEL.getType(),
-                    BpmCommentTypeEnum.CANCEL.formatComment("前一节点撤回"));
-            updateTaskStatusAndReason(task.getId(), BpmTaskStatusEnum.CANCEL.getStatus(), BpmReasonEnum.CANCEL_BY_WITHDRAW.getReason());
+            // 添加评论：说明是因为前一节点撤回而取消
+            taskService.addComment(
+                    task.getId(),
+                    taskInstance.getProcessInstanceId(),
+                    BpmCommentTypeEnum.CANCEL.getType(),
+                    BpmCommentTypeEnum.CANCEL.formatComment("前一节点撤回")
+            );
+            // 更新任务状态为“已取消”
+            updateTaskStatusAndReason(
+                    task.getId(),
+                    BpmTaskStatusEnum.CANCEL.getStatus(),
+                    BpmReasonEnum.CANCEL_BY_WITHDRAW.getReason()
+            );
+            // 记录这些任务对应的“执行流 ID”（executionId），用于下一步跳转
             withdrawExecutionIds.add(task.getExecutionId());
         }
-        // 2.2 执行撤回操作
+
+        // 2.2 使用 Flowable 的“改变流程状态”功能，将流程跳回到用户刚才审批的节点
         runtimeService.createChangeActivityStateBuilder()
-                .processInstanceId(processInstance.getProcessInstanceId())
-                .moveExecutionsToSingleActivityId(withdrawExecutionIds, taskInstance.getTaskDefinitionKey())
-                .changeState();
+                .processInstanceId(processInstance.getProcessInstanceId()) // 指定流程实例
+                .moveExecutionsToSingleActivityId( // 把多个执行流（可能有并行分支）都跳回到同一个节点
+                        withdrawExecutionIds,
+                        taskInstance.getTaskDefinitionKey() // 目标节点：用户之前审批的节点
+                )
+                .changeState(); // 执行跳转
+
+        // 撤回成功后，用户会再次看到自己之前的审批任务，可以重新提交
     }
 
     /**
@@ -1317,109 +1510,173 @@ public class BpmTaskServiceImpl implements BpmTaskService {
 
     // ========== Event 事件相关方法 ==========
 
+    /**
+     * 当一个新审批任务被流程引擎创建时，自动触发此方法进行初始化处理。
+     * <p>
+     * 主要工作包括：
+     * 1. 设置任务状态为“待办中”（RUNNING）
+     * 2. 检查流程配置，看是否需要在任务创建时调用外部 HTTP 接口（如通知系统）
+     * 3. 处理“自动审批”逻辑：比如配置为“无人审批时自动通过”，或任务本身就是“自动通过”
+     * <p>
+     * ⚠️ 注意：自动审批不能在当前事务中立即执行（会导致流程引擎异常），
+     *        所以要注册一个“事务完成后的回调”，等数据库提交成功后再处理。
+     *
+     * @param task 刚刚被创建的新任务对象
+     */
     @Override
     public void processTaskCreated(Task task) {
-        // 1. 设置为待办中
+
+        // =============== 第一步：设置任务状态 ===============
+        // 每个任务都有一个自定义状态字段（存在 local variables 中），用作业务状态（如待办、已办、已取消等）
         Integer status = (Integer) task.getTaskLocalVariables().get(BpmnVariableConstants.TASK_VARIABLE_STATUS);
+
+        // 防止重复处理：如果任务已经有状态了，说明可能被多次触发，直接跳过
         if (status != null) {
-            log.error("[updateTaskStatusWhenCreated][taskId({}) 已经有状态({})]", task.getId(), status);
+            log.error("[processTaskCreated][任务 {} 已经有状态 {}，跳过处理]", task.getId(), status);
             return;
         }
+
+        // 设置任务状态为“待办中”（RUNNING）
         updateTaskStatus(task.getId(), BpmTaskStatusEnum.RUNNING.getStatus());
 
+        // =============== 第二步：获取流程实例 ===============
         ProcessInstance processInstance = processInstanceService.getProcessInstance(task.getProcessInstanceId());
         if (processInstance == null) {
-            log.error("[processTaskCreated][taskId({}) 没有找到流程实例]", task.getId());
-            return;
-        }
-        BpmProcessDefinitionInfoDO processDefinitionInfo = bpmProcessDefinitionService.
-                getProcessDefinitionInfo(processInstance.getProcessDefinitionId());
-        if (processDefinitionInfo == null) {
-            log.error("[processTaskCreated][processDefinitionId({}) 没有找到流程定义]", processInstance.getProcessDefinitionId());
+            log.error("[processTaskCreated][找不到任务 {} 所属的流程实例]", task.getId());
             return;
         }
 
-        // 2. 任务前置通知
+        // =============== 第三步：获取流程的扩展配置 ===============
+        // 比如：是否开启任务创建前通知？是否允许自动审批？等
+        BpmProcessDefinitionInfoDO processDefinitionInfo = bpmProcessDefinitionService
+                .getProcessDefinitionInfo(processInstance.getProcessDefinitionId());
+        if (processDefinitionInfo == null) {
+            log.error("[processTaskCreated][找不到流程定义 {} 的扩展信息]", processInstance.getProcessDefinitionId());
+            return;
+        }
+
+        // =============== 第四步：如果配置了“任务创建前触发 HTTP 请求”，就执行它 ===============
+        // 例如：通知企业微信/钉钉，或调用第三方系统接口
         if (ObjUtil.isNotNull(processDefinitionInfo.getTaskBeforeTriggerSetting())) {
             BpmModelMetaInfoVO.HttpRequestSetting setting = processDefinitionInfo.getTaskBeforeTriggerSetting();
-            BpmHttpRequestUtils.executeBpmHttpRequest(processInstance,
-                    setting.getUrl(), setting.getHeader(), setting.getBody(), true, setting.getResponse());
+            BpmHttpRequestUtils.executeBpmHttpRequest(
+                    processInstance,
+                    setting.getUrl(),     // 目标地址
+                    setting.getHeader(),  // 请求头（如 token）
+                    setting.getBody(),    // 请求体（可含流程变量）
+                    true,                 // 异步执行（不阻塞当前流程）
+                    setting.getResponse() // 如何处理返回结果（比如只记录日志）
+            );
         }
 
-        // 3. 处理自动通过的情况，例如说：1）无审批人时，是否自动通过、不通过；2）非【人工审核】时，是否自动通过、不通过
+        // =============== 第五步：读取当前任务（UserTask）的审批配置 ===============
+        // 从 BPMN 流程模型中找到这个任务节点（比如某个“部门经理审批”节点）
         BpmnModel bpmnModel = modelService.getBpmnModelByDefinitionId(processInstance.getProcessDefinitionId());
         FlowElement userTaskElement = BpmnModelUtils.getFlowElementById(bpmnModel, task.getTaskDefinitionKey());
+
+        // 解析两个关键配置：
+        // 1. approveType：这个任务是“人工审批”还是“自动通过/自动拒绝”？
         Integer approveType = BpmnModelUtils.parseApproveType(userTaskElement);
+        // 2. assignEmptyHandlerType：如果没人被分配（审批人为空），该怎么处理？
         Integer assignEmptyHandlerType = BpmnModelUtils.parseAssignEmptyHandlerType(userTaskElement);
+
+        // =============== 第六步：注册“事务完成后的回调”来处理自动审批 ===============
+        // 为什么不能现在就审批？因为当前数据库事务还没提交，直接操作流程会导致异常！
+        // 所以要等事务成功提交后，再执行自动审批。
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 
             /**
-             * 特殊情况：部分情况下，TransactionSynchronizationManager 注册 afterCommit 监听时，不会被调用，但是 afterCompletion 可以
-             * 例如说：第一个 task 就是配置【自动通过】或者【自动拒绝】时
-             * 参见 <a href="https://gitee.com/zhijiantianya/yudao-cloud/issues/IB7V7Q">issue</a> 反馈
+             * 在事务完成后调用（无论提交还是回滚）。
+             * 说明：有些特殊场景（如第一个任务就是自动审批），Spring 的 afterCommit 不会被调用，
+             * 但 afterCompletion 一定会被调用，所以在这里处理更安全。
+             * 相关问题参考：https://gitee.com/zhijiantianya/yudao-cloud/issues/IB7V7Q
              */
             @Override
             public void afterCompletion(int transactionStatus) {
-                // 回滚情况，直接返回
+                // 如果事务回滚了，就不做任何事
                 if (ObjectUtil.equal(transactionStatus, TransactionSynchronization.STATUS_ROLLED_BACK)) {
                     return;
                 }
-                // 特殊情况：第一个 task 【自动通过】时，第二个任务设置审批人时 transactionStatus 会为 STATUS_UNKNOWN，不知道啥原因
+
+                // 如果事务状态未知（比如异常中断），且任务已经被删除，也跳过
                 if (ObjectUtil.equal(transactionStatus, TransactionSynchronization.STATUS_UNKNOWN)
                         && getTask(task.getId()) == null) {
                     return;
                 }
-                // 特殊情况一：【人工审核】审批人为空，根据配置是否要自动通过、自动拒绝
+
+                // ---------------- 情况一：人工审批任务，但没人被分配 ----------------
                 if (ObjectUtil.equal(approveType, BpmUserTaskApproveTypeEnum.USER.getType())) {
-                    // 如果有审批人、或者拥有人，则说明不满足情况一，不自动通过、不自动拒绝
+                    // 如果任务已经有审批人（assignee）或所有者（owner），说明正常分配了，不用自动处理
                     if (!ObjectUtil.isAllEmpty(task.getAssignee(), task.getOwner())) {
                         return;
                     }
+
+                    // 根据流程设计时的配置决定行为：
                     if (ObjectUtil.equal(assignEmptyHandlerType, BpmUserTaskAssignEmptyHandlerTypeEnum.APPROVE.getType())) {
+                        // 自动通过
                         getSelf().approveTask(null, new BpmTaskApproveReqVO()
-                                .setId(task.getId()).setReason(BpmReasonEnum.ASSIGN_EMPTY_APPROVE.getReason()));
+                                .setId(task.getId())
+                                .setReason(BpmReasonEnum.ASSIGN_EMPTY_APPROVE.getReason()));
                     } else if (ObjectUtil.equal(assignEmptyHandlerType, BpmUserTaskAssignEmptyHandlerTypeEnum.REJECT.getType())) {
+                        // 自动拒绝
                         getSelf().rejectTask(null, new BpmTaskRejectReqVO()
-                                .setId(task.getId()).setReason(BpmReasonEnum.ASSIGN_EMPTY_REJECT.getReason()));
+                                .setId(task.getId())
+                                .setReason(BpmReasonEnum.ASSIGN_EMPTY_REJECT.getReason()));
                     }
-                    // 特殊情况二：【自动审核】审批类型为自动通过、不通过
+                    // 如果配置是“不做处理”，就什么都不做，任务会一直挂着
+
+                    // ---------------- 情况二：任务本身就是自动审批类型 ----------------
                 } else {
                     if (ObjectUtil.equal(approveType, BpmUserTaskApproveTypeEnum.AUTO_APPROVE.getType())) {
+                        // 自动通过
                         getSelf().approveTask(null, new BpmTaskApproveReqVO()
-                                .setId(task.getId()).setReason(BpmReasonEnum.APPROVE_TYPE_AUTO_APPROVE.getReason()));
+                                .setId(task.getId())
+                                .setReason(BpmReasonEnum.APPROVE_TYPE_AUTO_APPROVE.getReason()));
                     } else if (ObjectUtil.equal(approveType, BpmUserTaskApproveTypeEnum.AUTO_REJECT.getType())) {
+                        // 自动拒绝
                         getSelf().rejectTask(null, new BpmTaskRejectReqVO()
-                                .setId(task.getId()).setReason(BpmReasonEnum.APPROVE_TYPE_AUTO_REJECT.getReason()));
+                                .setId(task.getId())
+                                .setReason(BpmReasonEnum.APPROVE_TYPE_AUTO_REJECT.getReason()));
                     }
                 }
             }
-
         });
     }
-
     /**
-     * 重要补充说明：该方法目前主要有两个情况会调用到：
-     * <p>
-     * 1. 或签场景 + 审批通过：一个或签有多个审批时，如果 A 审批通过，其它或签 B、C 等任务会被 Flowable 自动删除，此时需要通过该方法更新状态为已取消
-     * 2. 审批不通过：在 {@link #rejectTask(Long, BpmTaskRejectReqVO)} 不通过时，对于加签的任务，不会被 Flowable 删除，此时需要通过该方法更新状态为已取消
+     * 重要说明：这个方法主要用于处理“任务被取消”的场景，主要有两种情况：
+     *
+     * 1. 【或签】场景：比如 A、B、C 三人是“或签”（任意一人审批即可），
+     *    如果 A 审批通过了，Flowable 会自动删除 B 和 C 的任务。
+     *    这时我们需要把 B 和 C 的任务状态更新为“已取消”。
+     *
+     * 2. 【审批不通过】时：比如主审批人拒绝了，但之前加签了其他人（比如抄送人），
+     *    这些加签任务不会被 Flowable 自动删除，我们也需要手动把它们标记为“已取消”。
      */
     @Override
     public void processTaskCanceled(String taskId) {
+        // 先尝试获取任务对象（注意：被删除的任务可能已经变成历史任务，此时拿不到）
         Task task = getTask(taskId);
-        // 1. 可能只是活动，不是任务，所以查询不到
         if (task == null) {
-            log.error("[updateTaskStatusWhenCanceled][taskId({}) 任务不存在]", taskId);
+            log.error("[processTaskCanceled][任务 {} 不存在（可能已被删除）]", taskId);
             return;
         }
 
-        // 2. 更新 task 状态 + 原因
+        // 检查任务当前状态，如果已经是“结束状态”（比如已通过、已拒绝），就不用再处理了
         Integer status = (Integer) task.getTaskLocalVariables().get(BpmnVariableConstants.TASK_VARIABLE_STATUS);
         if (BpmTaskStatusEnum.isEndStatus(status)) {
-            log.error("[updateTaskStatusWhenCanceled][taskId({}) 处于结果({})，无需进行更新]", taskId, status);
+            log.error("[processTaskCanceled][任务 {} 已是结束状态 {}，无需更新]", taskId, status);
             return;
         }
-        updateTaskStatusAndReason(taskId, BpmTaskStatusEnum.CANCEL.getStatus(), BpmReasonEnum.CANCEL_BY_SYSTEM.getReason());
-        // 补充说明：由于 Task 被删除成 HistoricTask 后，无法通过 taskService.addComment 添加理由，所以无法存储具体的取消理由
+
+        // 将任务状态更新为“已取消”，并记录取消原因（系统自动取消）
+        updateTaskStatusAndReason(
+                taskId,
+                BpmTaskStatusEnum.CANCEL.getStatus(),
+                BpmReasonEnum.CANCEL_BY_SYSTEM.getReason()
+        );
+
+        // 注意：一旦任务被 Flowable 删除（变成历史任务），就无法再用 addComment 添加审批意见了，
+        // 所以这里只能通过本地状态记录取消原因，无法在流程引擎里留痕。
     }
 
     @Override
