@@ -3,113 +3,129 @@
 spring:
   cloud:
     nacos:
-      server-addr: 127.0.0.1:8848 # Nacos 服务器地址
-      username: # Nacos 账号
-      password: # Nacos 密码
-      discovery: # 【配置中心】配置项
-        namespace: dev # 命名空间。这里使用 dev 开发环境
-        group: DEFAULT_GROUP # 使用的 Nacos 配置分组，默认为 DEFAULT_GROUP
-        metadata:
-          version: 1.0.0 # 服务实例的版本号，可用于灰度发布
-      config: # 【注册中心】配置项
-        namespace: dev # 命名空间。这里使用 dev 开发环境
-        group: DEFAULT_GROUP # 使用的 Nacos 配置分组，默认为 DEFAULT_GROUP
+      server-addr: 127.0.0.1:8848 # Nacos 服务的地址，格式为 IP:端口。Nacos 用于服务注册发现和配置管理
+      username:                 # 登录 Nacos 控制台的用户名（如未开启鉴权可留空）
+      password:                 # 登录 Nacos 控制台的密码（如未开启鉴权可留空）
+
+      discovery:                # 【服务注册与发现】配置项：用于将本服务注册到 Nacos 中
+        namespace: dev          # 命名空间 ID。不同环境（如 dev/test/prod）使用不同命名空间隔离服务
+        group: DEFAULT_GROUP    # 分组名称。用于对服务进行逻辑分组，默认值即可
+        metadata:               # 服务实例的附加信息（可被其他服务读取）
+          version: 1.0.0        # 当前服务的版本号，可用于灰度发布（如 A/B 测试）
+
+      config:                   # 【配置中心】配置项：用于从 Nacos 动态加载配置
+        namespace: dev          # 与 discovery 保持一致，确保读取对应环境的配置
+        group: DEFAULT_GROUP    # 与 discovery 保持一致，确保读取对应分组的配置
 
 --- #################### 数据库相关配置 ####################
+
 spring:
-  # 数据源配置项
+  # 自动配置排除项（此处为空，表示不排除任何自动配置）
   autoconfigure:
     exclude:
+
   datasource:
-    druid: # Druid 【监控】相关的全局配置
+    # Druid 是一个数据库连接池，也提供监控功能
+    druid:
       web-stat-filter:
-        enabled: true
+        enabled: true           # 启用 Web 统计过滤器（用于记录 HTTP 请求等监控信息）
       stat-view-servlet:
-        enabled: true
-        allow: # 设置白名单，不填则允许所有访问
-        url-pattern: /druid/*
-        login-username: # 控制台管理用户名和密码
-        login-password:
+        enabled: true           # 启用 Druid 内置的监控页面（访问 /druid 可查看）
+        allow:                  # 白名单 IP，留空表示允许所有 IP 访问（生产环境建议设置）
+        url-pattern: /druid/*   # 监控页面的访问路径
+        login-username:         # 登录监控页面的用户名（建议生产环境设置）
+        login-password:         # 登录监控页面的密码（建议生产环境设置）
+
       filter:
-        stat:
+        stat:                   # 启用 SQL 执行监控
           enabled: true
-          log-slow-sql: true # 慢 SQL 记录
-          slow-sql-millis: 100
-          merge-sql: true
-        wall:
+          log-slow-sql: true    # 是否记录慢 SQL
+          slow-sql-millis: 100  # 超过 100 毫秒的 SQL 被认为是“慢 SQL”
+          merge-sql: true       # 是否合并相同 SQL 的统计（减少冗余）
+        wall:                   # 启用 SQL 防火墙（防止 SQL 注入）
           config:
-            multi-statement-allow: true
-    dynamic: # 多数据源配置
-      druid: # Druid 【连接池】相关的全局配置
-        initial-size: 5 # 初始连接数
-        min-idle: 10 # 最小连接池数量
-        max-active: 20 # 最大连接池数量
-        max-wait: 60000 # 配置获取连接等待超时的时间，单位：毫秒（1 分钟）
-        time-between-eviction-runs-millis: 60000 # 配置间隔多久才进行一次检测，检测需要关闭的空闲连接，单位：毫秒
-        min-evictable-idle-time-millis: 600000 # 配置一个连接在池中最小生存的时间，单位：毫秒（10 分钟）
-        max-evictable-idle-time-millis: 1800000 # 配置一个连接在池中最大生存的时间，单位：毫秒（30 分钟）
-        validation-query: SELECT 1 FROM DUAL # 配置检测连接是否有效
-        test-while-idle: true
-        test-on-borrow: false
-        test-on-return: false
-        pool-prepared-statements: true # 是否开启 PreparedStatement 缓存
-        max-pool-prepared-statement-per-connection-size: 20 # 每个连接缓存的 PreparedStatement 数量
-      primary: master
+            multi-statement-allow: true  # 是否允许多条 SQL 语句同时执行（如 "SELECT; UPDATE"）
+
+    dynamic:                    # 多数据源配置（支持主从、多库等场景）
+      druid:                    # Druid 连接池的通用配置，适用于所有数据源
+        initial-size: 5         # 初始创建的连接数
+        min-idle: 10            # 连接池中最小空闲连接数
+        max-active: 20          # 连接池中最大活跃连接数（超过会排队或报错）
+        max-wait: 60000         # 获取连接的最大等待时间（毫秒），超时抛异常
+        time-between-eviction-runs-millis: 60000   # 多久检查一次空闲连接（毫秒）
+        min-evictable-idle-time-millis: 600000     # 空闲连接最少存活多久后可被回收（10 分钟）
+        max-evictable-idle-time-millis: 1800000    # 空闲连接最多存活多久后必须被回收（30 分钟）
+        validation-query: SELECT 1 FROM DUAL       # 用于检测连接是否有效的 SQL（MySQL 可用 "SELECT 1"）
+        test-while-idle: true   # 空闲时是否检测连接有效性
+        test-on-borrow: false   # 从连接池借出时不检测（性能更好）
+        test-on-return: false   # 归还时不检测
+        pool-prepared-statements: true             # 是否缓存 PreparedStatement（提升性能）
+        max-pool-prepared-statement-per-connection-size: 20  # 每个连接最多缓存 20 条预编译语句
+
+      primary: master           # 默认使用的数据源名称（这里是 master）
       datasource:
         master:
-          url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true # MySQL Connector/J 8.X 连接的示例
-          username: root
-          password: 123456
-        slave: # 模拟从库，可根据自己需要修改 # 模拟从库，可根据自己需要修改
-          lazy: true # 开启懒加载，保证启动速度
-          url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true # MySQL Connector/J 8.X 连接的示例
+          url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true
+          # MySQL 8.x 的连接 URL，参数说明：
+          # useSSL=false：关闭 SSL（开发环境常用）
+          # serverTimezone=Asia/Shanghai：设置时区
+          # allowPublicKeyRetrieval=true：允许公钥检索（解决某些连接问题）
+          # nullCatalogMeansCurrent=true：兼容某些工具
+          # rewriteBatchedStatements=true：开启批量插入优化
+          username: root        # 数据库用户名
+          password: 123456      # 数据库密码
+
+        slave:                  # 从库配置（可用于读写分离）
+          lazy: true            # 懒加载：启动时不立即初始化，首次使用时才连接（加快启动速度）
+          url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true
           username: root
           password: 123456
 
-  # Redis 配置。Redisson 默认的配置足够使用，一般不需要进行调优
+  # Redis 配置（用于缓存、分布式锁等）
   data:
     redis:
-      host: 400-infra.server.iocoder.cn # 地址
-      port: 6379 # 端口
-      database: 1 # 数据库索引
-#      password: 123456 # 密码，建议生产环境开启
+      host: 400-infra.server.iocoder.cn  # Redis 服务器地址
+      port: 6379                         # Redis 默认端口
+      database: 1                        # 使用第 1 号数据库（Redis 有 0-15 共 16 个库）
+      # password: 123456                 # Redis 密码（开发可注释，生产建议开启）
 
 --- #################### MQ 消息队列相关配置 ####################
+# （此处暂未填写，可根据需要添加 RocketMQ / RabbitMQ / Kafka 等配置）
 
 --- #################### 定时任务相关配置 ####################
+
 xxl:
   job:
     admin:
-      addresses: http://127.0.0.1:9090/xxl-job-admin # 调度中心部署跟地址
+      addresses: http://127.0.0.1:9090/xxl-job-admin  # XXL-JOB 调度中心的地址（用于注册和接收任务）
 
 --- #################### 服务保障相关配置 ####################
 
-# Lock4j 配置项
+# Lock4j 是一个轻量级分布式锁组件
 lock4j:
-  acquire-timeout: 3000 # 获取分布式锁超时时间，默认为 3000 毫秒
-  expire: 30000 # 分布式锁的超时时间，默认为 30 毫秒
+  acquire-timeout: 3000       # 尝试获取锁的最长时间（3 秒），超时则失败
+  expire: 30000               # 锁的自动过期时间（30 秒），防止死锁（注意：单位是毫秒，原文“30 毫秒”应为笔误）
 
 --- #################### 监控相关配置 ####################
 
-# Actuator 监控端点的配置项
+# Spring Boot Actuator：提供应用健康检查、指标监控等端点
 management:
   endpoints:
     web:
-      base-path: /actuator # Actuator 提供的 API 接口的根目录。默认为 /actuator
+      base-path: /actuator    # 所有监控接口的根路径（如 /actuator/health）
       exposure:
-        include: '*' # 需要开放的端点。默认值只打开 health 和 info 两个端点。通过设置 * ，可以开放所有端点。
+        include: '*'          # 开放所有监控端点（生产环境应按需开放，如只开 health/info）
 
-# Spring Boot Admin 配置项
+# Spring Boot Admin 客户端配置（用于将应用注册到监控平台）
 spring:
   boot:
     admin:
-      # Spring Boot Admin Client 客户端的相关配置
       client:
         instance:
-          service-host-type: IP # 注册实例时，优先使用 IP [IP, HOST_NAME, CANONICAL_HOST_NAME]
+          service-host-type: IP  # 注册时使用 IP 地址而不是主机名（更稳定）
 
 --- #################### 芋道相关配置 ####################
 
-# 芋道配置项，设置当前项目所有自定义的配置
+# 芋道（RuoYi-Vue-Pro）自定义配置
 yudao:
-  demo: true # 开启演示模式
+  demo: true   # 开启演示模式（通常会关闭删除/修改等危险操作，防止误操作）

@@ -47,8 +47,25 @@ import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertSet;
 
 /**
- * 流程实例 (Process Instance) 转换器接口
- * 用于将 Flowable 引擎中的流程实例、任务等原始对象转换为前端需要的 VO 对象。
+ * 流程实例转换器接口
+ *
+ * <p>这个接口的作用是将 Flowable 工作流引擎中的原始数据对象转换成前端需要的 VO（视图对象）</p>
+ *
+ * <h3>什么是转换器？</h3>
+ * <p>在实际开发中，数据库或第三方框架（如 Flowable）返回的数据结构往往不能直接给前端使用，
+ * 需要进行格式转换、字段补充等操作。转换器就是专门做这个工作的工具类。</p>
+ *
+ * <h3>为什么使用 MapStruct？</h3>
+ * <p>MapStruct 是一个代码生成工具，可以自动生成对象之间的转换代码，避免手写大量的 getter/setter，
+ * 提高开发效率并减少出错。</p>
+ *
+ * <h3>主要功能：</h3>
+ * <ul>
+ *   <li>1. 将流程实例（ProcessInstance）转换为前端展示的 VO 对象</li>
+ *   <li>2. 补充关联数据，如用户信息、部门信息、流程定义信息等</li>
+ *   <li>3. 构建流程图展示所需的数据（包括高亮已完成的节点）</li>
+ *   <li>4. 生成打印数据、审批详情等复杂业务对象</li>
+ * </ul>
  *
  * @author 芋道源码
  */
@@ -56,21 +73,35 @@ import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.
 public interface BpmProcessInstanceConvert {
 
     /**
-     * MapStruct 实例，用于自动映射简单字段。
+     * MapStruct 自动生成的转换器实例
+     *
+     * <p>通过这个实例可以调用接口中定义的转换方法</p>
      */
     BpmProcessInstanceConvert INSTANCE = Mappers.getMapper(BpmProcessInstanceConvert.class);
 
     /**
-     * 将分页查询结果（历史流程实例）转换为返回给前端的分页 VO。
+     * 构建流程实例分页列表数据
      *
-     * @param pageResult                 Flowable 查询的历史流程实例分页结果
-     * @param processDefinitionMap       流程定义 Map，key 为 processDefinitionId
-     * @param categoryMap                流程分类 Map，key 为 categoryId
-     * @param taskMap                    当前流程实例关联的待办任务列表 Map，key 为 processInstanceId
-     * @param userMap                    用户信息 Map，key 为 userId
-     * @param deptMap                    部门信息 Map，key 为 deptId
-     * @param processDefinitionInfoMap   流程定义扩展信息 Map，key 为 processDefinitionId
-     * @return 转换后的分页 VO
+     * <p><b>应用场景：</b>在"我的流程"、"待办任务"等列表页面，需要展示流程实例的分页数据</p>
+     *
+     * <p><b>处理流程：</b></p>
+     * <ol>
+     *   <li>1. 将 Flowable 返回的历史流程实例分页结果转换为 VO 对象</li>
+     *   <li>2. 根据流程定义 ID 补充流程定义信息（名称、版本等）</li>
+     *   <li>3. 根据分类 ID 补充分类名称</li>
+     *   <li>4. 补充当前流程的待办任务列表</li>
+     *   <li>5. 补充发起人和处理人的用户信息、部门信息</li>
+     *   <li>6. 根据配置生成流程摘要（表单字段的关键信息）</li>
+     * </ol>
+     *
+     * @param pageResult                Flowable 查询返回的历史流程实例分页结果
+     * @param processDefinitionMap      流程定义 Map，key=流程定义ID，value=流程定义对象（用于快速查找）
+     * @param categoryMap               流程分类 Map，key=分类ID，value=分类对象
+     * @param taskMap                   当前待办任务 Map，key=流程实例ID，value=该流程的待办任务列表
+     * @param userMap                   用户信息 Map，key=用户ID，value=用户对象（用于补充发起人、处理人信息）
+     * @param deptMap                   部门信息 Map，key=部门ID，value=部门对象（用于补充部门名称）
+     * @param processDefinitionInfoMap  流程定义扩展信息 Map（包含表单配置、摘要配置等）
+     * @return 转换后的分页 VO 对象，可直接返回给前端
      */
     default PageResult<BpmProcessInstanceRespVO> buildProcessInstancePage(
             PageResult<HistoricProcessInstance> pageResult,
@@ -140,7 +171,18 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 构建单个流程实例的 VO（用于详情页等）
+     * 构建单个流程实例的详细信息
+     *
+     * <p><b>应用场景：</b>查看流程实例详情页时调用，返回完整的流程实例信息</p>
+     *
+     * <p><b>与分页列表的区别：</b>这个方法用于单条数据的详情展示，参数更简单直接</p>
+     *
+     * @param processInstance        历史流程实例对象（Flowable 原始对象）
+     * @param processDefinition      流程定义对象（包含流程名称、版本等基本信息）
+     * @param processDefinitionInfo  流程定义扩展信息（包含表单配置等）
+     * @param startUser              流程发起人用户信息
+     * @param dept                   发起人所属部门信息
+     * @return 转换后的流程实例 VO 对象，包含完整的流程信息
      */
     default BpmProcessInstanceRespVO buildProcessInstance(
             HistoricProcessInstance processInstance,
@@ -172,14 +214,37 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 将 BpmProcessDefinitionInfoDO 中的扩展字段复制到 BpmProcessDefinitionRespVO
-     * （注意：不复制 id，防止覆盖）
+     * 复制流程定义扩展信息到响应对象
+     *
+     * <p><b>注意：</b>使用 @Mapping 注解忽略 id 字段，避免覆盖目标对象的 id</p>
+     *
+     * <p><b>为什么需要这个方法？</b>流程定义扩展信息（processDefinitionInfo）中包含表单配置、
+     * 按钮配置等额外信息，需要合并到流程定义响应对象中一起返回给前端</p>
+     *
+     * @param from 源对象：流程定义扩展信息（数据库实体）
+     * @param to   目标对象：流程定义响应 VO（会被修改）
      */
     @Mapping(source = "from.id", target = "to.id", ignore = true)
     void copyTo(BpmProcessDefinitionInfoDO from, @MappingTarget BpmProcessDefinitionRespVO to);
 
     /**
-     * 构建流程状态变更事件（用于事件驱动，如发送消息）
+     * 构建流程实例状态变更事件
+     *
+     * <p><b>应用场景：</b>当流程状态发生变化时（如通过、驳回、取消），需要发布事件通知其他模块</p>
+     *
+     * <p><b>事件驱动架构：</b>通过事件机制，可以解耦业务逻辑。例如：
+     * <ul>
+     *   <li>流程通过后，自动发送消息通知</li>
+     *   <li>流程驳回后，更新业务表状态</li>
+     *   <li>流程取消后，释放相关资源</li>
+     * </ul>
+     * </p>
+     *
+     * @param source 事件源对象（通常是触发事件的 Service 类）
+     * @param instance 流程实例对象
+     * @param status 新的流程状态（如：通过、驳回、取消等）
+     * @param reason 状态变更原因（如驳回原因）
+     * @return 流程实例状态变更事件对象
      */
     default BpmProcessInstanceStatusEvent buildProcessInstanceStatusEvent(
             Object source, ProcessInstance instance, Integer status, String reason) {
@@ -192,7 +257,14 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 构建“流程通过”时发送消息的 DTO
+     * 构建流程审批通过时的消息发送对象
+     *
+     * <p><b>应用场景：</b>当流程被审批通过时，需要发送消息通知相关人员（如发起人）</p>
+     *
+     * <p><b>消息内容示例：</b>"您的【请假申请】已通过审批"</p>
+     *
+     * @param instance 流程实例对象
+     * @return 消息发送请求 DTO，包含收件人、流程信息等
      */
     default BpmMessageSendWhenProcessInstanceApproveReqDTO buildProcessInstanceApproveMessage(ProcessInstance instance) {
         return new BpmMessageSendWhenProcessInstanceApproveReqDTO()
@@ -202,7 +274,15 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 构建“流程驳回”时发送消息的 DTO
+     * 构建流程被驳回时的消息发送对象
+     *
+     * <p><b>应用场景：</b>当流程被驳回时，需要发送消息通知发起人重新提交</p>
+     *
+     * <p><b>消息内容示例：</b>"您的【请假申请】已被驳回，原因：请假天数超出规定"</p>
+     *
+     * @param instance 流程实例对象
+     * @param reason 驳回原因（会显示在消息中）
+     * @return 消息发送请求 DTO，包含收件人、流程信息、驳回原因等
      */
     default BpmMessageSendWhenProcessInstanceRejectReqDTO buildProcessInstanceRejectMessage(
             ProcessInstance instance, String reason) {
@@ -214,17 +294,39 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 构建 BPMN 流程图展示所需的 VO（含高亮信息）
+     * 构建流程图模型视图数据
+     *
+     * <p><b>应用场景：</b>在流程详情页展示流程图，需要高亮显示已完成的节点和连线</p>
+     *
+     * <p><b>核心功能：</b></p>
+     * <ul>
+     *   <li>1. 提供 BPMN XML，前端可以渲染出流程图</li>
+     *   <li>2. 标记哪些节点已完成（绿色）、哪些待处理（黄色）、哪些被驳回（红色）</li>
+     *   <li>3. 标记已走过的连线（用于显示流程流转路径）</li>
+     *   <li>4. 补充每个任务的处理人信息、处理时间、审批意见等</li>
+     * </ul>
+     *
+     * @param processInstance              历史流程实例对象
+     * @param taskInstances                历史任务列表（包含所有已完成和待办的任务）
+     * @param bpmnModel                    BPMN 模型对象（包含流程图的完整定义）
+     * @param simpleModel                  简化的模型对象（用于前端快速渲染）
+     * @param unfinishedTaskActivityIds    未完成任务的活动节点 ID 集合（前端会标记为黄色）
+     * @param finishedTaskActivityIds      已完成任务的活动节点 ID 集合（前端会标记为绿色）
+     * @param finishedSequenceFlowActivityIds 已走过的连线 ID 集合（前端会高亮显示）
+     * @param rejectTaskActivityIds        被驳回的任务节点 ID 集合（前端会标记为红色）
+     * @param userMap                      用户信息 Map，用于补充处理人信息
+     * @param deptMap                      部门信息 Map，用于补充部门名称
+     * @return 流程图模型视图 VO，包含流程图 XML、高亮信息、任务列表等
      */
     default BpmProcessInstanceBpmnModelViewRespVO buildProcessInstanceBpmnModelView(
             HistoricProcessInstance processInstance,
             List<HistoricTaskInstance> taskInstances,
             BpmnModel bpmnModel,
             BpmSimpleModelNodeVO simpleModel,
-            Set<String> unfinishedTaskActivityIds,    // 未完成任务对应的 Activity ID
-            Set<String> finishedTaskActivityIds,      // 已完成任务对应的 Activity ID
-            Set<String> finishedSequenceFlowActivityIds, // 已走过的连线（SequenceFlow）
-            Set<String> rejectTaskActivityIds,        // 被驳回的任务节点
+            Set<String> unfinishedTaskActivityIds,
+            Set<String> finishedTaskActivityIds,
+            Set<String> finishedSequenceFlowActivityIds,
+            Set<String> rejectTaskActivityIds,
             Map<Long, AdminUserRespDTO> userMap,
             Map<Long, DeptRespDTO> deptMap) {
 
@@ -260,7 +362,17 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 根据 userId 字符串构建 UserSimpleBaseVO（支持 null 和空字符串）
+     * 根据用户 ID 字符串构建用户简单信息对象
+     *
+     * <p><b>为什么需要这个方法？</b>Flowable 中存储的用户 ID 是字符串类型，
+     * 需要转换为 Long 类型后才能查询用户信息</p>
+     *
+     * <p><b>空值处理：</b>如果 userIdStr 为 null 或空字符串，直接返回 null</p>
+     *
+     * @param userIdStr 用户 ID 字符串（可能为 null 或空）
+     * @param userMap   用户信息 Map
+     * @param deptMap   部门信息 Map
+     * @return 用户简单信息 VO，包含姓名、部门等；如果用户不存在则返回 null
      */
     default UserSimpleBaseVO buildUser(String userIdStr,
                                        Map<Long, AdminUserRespDTO> userMap,
@@ -273,7 +385,19 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 根据 userId 构建 UserSimpleBaseVO（含部门名称）
+     * 根据用户 ID 构建用户简单信息对象
+     *
+     * <p><b>核心逻辑：</b></p>
+     * <ol>
+     *   <li>1. 从 userMap 中查找用户信息</li>
+     *   <li>2. 将用户信息转换为 VO 对象</li>
+     *   <li>3. 根据用户的部门 ID，从 deptMap 中查找部门名称并补充</li>
+     * </ol>
+     *
+     * @param userId  用户 ID
+     * @param userMap 用户信息 Map
+     * @param deptMap 部门信息 Map
+     * @return 用户简单信息 VO，包含姓名、部门名称等；如果用户不存在则返回 null
      */
     default UserSimpleBaseVO buildUser(Long userId,
                                        Map<Long, AdminUserRespDTO> userMap,
@@ -294,7 +418,19 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 构建审批详情中的任务信息（含状态、审批意见、签名图片等）
+     * 构建审批任务信息（用于审批详情页）
+     *
+     * <p><b>应用场景：</b>在审批详情页展示每个审批节点的详细信息</p>
+     *
+     * <p><b>包含信息：</b></p>
+     * <ul>
+     *   <li>任务状态（待处理、已通过、已驳回等）</li>
+     *   <li>审批意见（同意/不同意的理由）</li>
+     *   <li>签名图片 URL（如果启用了手写签名功能）</li>
+     * </ul>
+     *
+     * @param task 历史任务实例对象
+     * @return 审批任务信息 VO；如果 task 为 null 则返回 null
      */
     default BpmApprovalDetailRespVO.ActivityNodeTask buildApprovalTaskInfo(HistoricTaskInstance task) {
         if (task == null) {
@@ -307,7 +443,24 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 从流程实例、审批节点、待办任务中提取所有涉及的用户 ID（用于批量查询用户信息）
+     * 从流程数据中提取所有相关的用户 ID
+     *
+     * <p><b>为什么需要这个方法？</b>在构建审批详情等复杂对象时，需要补充多处的用户信息。
+     * 为了避免重复查询数据库，先把所有需要的用户 ID 收集起来，一次性批量查询，提高性能。</p>
+     *
+     * <p><b>收集范围：</b></p>
+     * <ul>
+     *   <li>流程发起人</li>
+     *   <li>所有任务的处理人（assignee）</li>
+     *   <li>所有任务的负责人（owner）</li>
+     *   <li>所有候选人（candidateUsers）</li>
+     *   <li>当前待办任务的相关人员</li>
+     * </ul>
+     *
+     * @param processInstance 历史流程实例对象
+     * @param activityNodes   审批节点列表（包含任务信息）
+     * @param todoTask        当前待办任务（可能为 null）
+     * @return 用户 ID 集合，用于批量查询用户信息
      */
     default Set<Long> parseUserIds(
             HistoricProcessInstance processInstance,
@@ -336,7 +489,14 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 更简化的用户 ID 提取方式（仅从流程实例和历史任务中提取）
+     * 从流程数据中提取用户 ID（简化版）
+     *
+     * <p><b>与 parseUserIds 的区别：</b>这个方法只从流程实例和历史任务中提取，
+     * 适用于不需要候选人等复杂信息的场景</p>
+     *
+     * @param processInstance 历史流程实例对象
+     * @param tasks           历史任务列表
+     * @return 用户 ID 集合
      */
     default Set<Long> parseUserIds02(HistoricProcessInstance processInstance, List<HistoricTaskInstance> tasks) {
         Set<Long> userIds = SetUtils.asSet(Long.valueOf(processInstance.getStartUserId()));
@@ -348,7 +508,36 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 构建完整的审批详情 VO（含流程定义、实例、节点、待办任务、字段权限等）
+     * 构建完整的审批详情数据
+     *
+     * <p><b>应用场景：</b>审批详情页是最复杂的业务场景之一，需要展示：</p>
+     * <ul>
+     *   <li>流程定义信息（流程名称、版本、表单配置等）</li>
+     *   <li>流程实例信息（发起人、发起时间、当前状态等）</li>
+     *   <li>审批节点列表（每个节点的处理人、处理时间、审批意见等）</li>
+     *   <li>当前待办任务（如果有）</li>
+     *   <li>表单字段权限（哪些字段可读、可写、隐藏）</li>
+     * </ul>
+     *
+     * <p><b>数据来源：</b>这个方法会整合来自多个服务的数据，包括：</p>
+     * <ul>
+     *   <li>Flowable 引擎：流程实例、任务信息</li>
+     *   <li>流程定义服务：流程定义、表单配置</li>
+     *   <li>用户服务：用户信息、部门信息</li>
+     *   <li>权限服务：字段权限配置</li>
+     * </ul>
+     *
+     * @param bpmnModel                BPMN 模型对象
+     * @param processDefinition        流程定义对象
+     * @param processDefinitionInfo    流程定义扩展信息
+     * @param processInstance          历史流程实例对象
+     * @param processInstanceStatus    流程实例当前状态
+     * @param activityNodes            审批节点列表（包含每个节点的任务、候选人等信息）
+     * @param todoTask                 当前待办任务（如果存在）
+     * @param formFieldsPermission     表单字段权限 Map，key=字段名，value=权限（READ/WRITE/HIDE）
+     * @param userMap                  用户信息 Map
+     * @param deptMap                  部门信息 Map
+     * @return 审批详情 VO，包含所有需要展示的信息
      */
     default BpmApprovalDetailRespVO buildApprovalDetail(
             BpmnModel bpmnModel,
@@ -358,7 +547,7 @@ public interface BpmProcessInstanceConvert {
             Integer processInstanceStatus,
             List<BpmApprovalDetailRespVO.ActivityNode> activityNodes,
             BpmTaskRespVO todoTask,
-            Map<String, String> formFieldsPermission, // 表单字段权限（如 read/write/hide）
+            Map<String, String> formFieldsPermission,
             Map<Long, AdminUserRespDTO> userMap,
             Map<Long, DeptRespDTO> deptMap) {
 
@@ -410,7 +599,27 @@ public interface BpmProcessInstanceConvert {
     }
 
     /**
-     * 构建流程打印数据（用于生成 PDF 或 HTML 打印）
+     * 构建流程打印数据
+     *
+     * <p><b>应用场景：</b>当用户点击"打印"按钮时，需要生成可打印的流程数据（PDF 或 HTML 格式）</p>
+     *
+     * <p><b>打印内容包括：</b></p>
+     * <ul>
+     *   <li>流程基本信息（流程名称、发起人、发起时间等）</li>
+     *   <li>表单数据（申请的详细内容）</li>
+     *   <li>审批历史（每个节点的处理人、处理时间、审批意见、签名图片）</li>
+     *   <li>自定义打印模板（如果配置了）</li>
+     * </ul>
+     *
+     * <p><b>模板功能：</b>管理员可以配置自定义打印模板（HTML 格式），使用变量占位符，
+     * 系统会自动替换为实际数据</p>
+     *
+     * @param historicProcessInstance  历史流程实例对象
+     * @param processDefinitionInfo    流程定义扩展信息（包含打印模板配置）
+     * @param tasks                    历史任务列表（所有已完成的审批任务）
+     * @param userMap                  用户信息 Map
+     * @param startUser                流程发起人信息
+     * @return 流程打印数据 VO，包含所有打印所需的信息
      */
     default BpmProcessPrintDataRespVO buildProcessInstancePrintData(
             HistoricProcessInstance historicProcessInstance,
