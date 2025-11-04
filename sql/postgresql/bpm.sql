@@ -631,3 +631,12 @@ DROP SEQUENCE IF EXISTS bpm_user_group_seq;
 CREATE SEQUENCE bpm_user_group_seq
     START 1;
 
+ALTER TABLE bpm_process_definition_info 
+ADD COLUMN IF NOT EXISTS category varchar(64) NULL,
+ADD COLUMN IF NOT EXISTS start_dept_ids varchar(256) NULL,
+ADD COLUMN IF NOT EXISTS allow_withdraw_task bool NOT NULL DEFAULT false,
+ADD COLUMN IF NOT EXISTS process_before_trigger_setting varchar(512) NULL,
+ADD COLUMN IF NOT EXISTS process_after_trigger_setting varchar(512) NULL,
+ADD COLUMN IF NOT EXISTS task_before_trigger_setting varchar(512) NULL,
+ADD COLUMN IF NOT EXISTS task_after_trigger_setting varchar(512) NULL,
+ADD COLUMN IF NOT EXISTS print_template_setting varchar(512) NULL;
