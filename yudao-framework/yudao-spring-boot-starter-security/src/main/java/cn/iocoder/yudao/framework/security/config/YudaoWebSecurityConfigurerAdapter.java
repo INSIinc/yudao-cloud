@@ -39,50 +39,59 @@ import java.util.Set;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertList;
 
 /**
- * 自定义的 Spring Security 配置适配器实现
+ * 自定义 Spring Security 安全配置类。
+ *
+ * Spring Security 是一个功能强大的安全框架，用于控制“哪些用户能访问哪些接口”。
+ *
+ * 本项目基于 Token（如 JWT）做认证，无需登录页面和 Session，适合前后端分离项目。
+ *
+ * 主要功能：
+ * - 放行静态资源（如 .js、.css）
+ * - 自动识别 @PermitAll 注解的接口，无需登录
+ * - 支持配置文件中指定的免登录 URL（security.permit-all-urls）
+ * - 添加自定义 Token 认证过滤器
+ * - 全局处理“未登录”和“权限不足”的异常
  *
  * @author 芋道源码
  */
 @AutoConfiguration
-@AutoConfigureOrder(-1) // 目的：先于 Spring Security 自动配置，避免一键改包后，org.* 基础包无法生效
-@EnableMethodSecurity(securedEnabled = true)
+@AutoConfigureOrder(-1) // 优先加载，确保本配置先于 Spring Security 默认配置生效
+@EnableMethodSecurity(securedEnabled = true) // 开启方法级安全注解（如 @PreAuthorize）
 public class YudaoWebSecurityConfigurerAdapter {
 
+    // 从配置文件读取 Web 相关配置（如 API 前缀）
     @Resource
     private WebProperties webProperties;
+
+    // 从配置文件读取 Security 相关配置（如 permit-all-urls）
     @Resource
     private SecurityProperties securityProperties;
 
-    /**
-     * 认证失败处理类 Bean
-     */
+    // 自定义“未登录”处理器：返回 401 错误给前端
     @Resource
     private AuthenticationEntryPoint authenticationEntryPoint;
-    /**
-     * 权限不够处理器 Bean
-     */
+
+    // 自定义“权限不足”处理器：返回 403 错误给前端
     @Resource
     private AccessDeniedHandler accessDeniedHandler;
-    /**
-     * Token 认证过滤器 Bean
-     */
+
+    // 自定义 Token 认证过滤器：从请求头中解析 Token 并验证用户身份
     @Resource
     private TokenAuthenticationFilter authenticationTokenFilter;
 
-    /**
-     * 自定义的权限映射 Bean 们
-     *
-     * @see #filterChain(HttpSecurity)
-     */
+    // 允许其他模块自定义权限规则（例如：系统模块、订单模块各自定义自己的放行规则）
     @Resource
     private List<AuthorizeRequestsCustomizer> authorizeRequestsCustomizers;
 
+    // Spring 应用上下文，用于获取所有 Controller 的接口信息
     @Resource
     private ApplicationContext applicationContext;
 
     /**
-     * 由于 Spring Security 创建 AuthenticationManager 对象时，没声明 @Bean 注解，导致无法被注入
-     * 通过覆写父类的该方法，添加 @Bean 注解，解决该问题
+     * 将 Spring Security 的认证管理器（AuthenticationManager）暴露为 Bean，
+     * 以便在其他地方（如登录接口）注入使用。
+     *
+     * 默认情况下，AuthenticationManager 不会自动注册为 Bean，这里手动注册。
      */
     @Bean
     public AuthenticationManager authenticationManagerBean(AuthenticationConfiguration authenticationConfiguration) throws Exception {
@@ -90,85 +99,108 @@ public class YudaoWebSecurityConfigurerAdapter {
     }
 
     /**
-     * 配置 URL 的安全配置
+     * 配置 HTTP 请求的安全规则（哪些接口要登录，哪些不用）。
      *
-     * anyRequest          |   匹配所有请求路径
-     * access              |   SpringEl表达式结果为true时可以访问
-     * anonymous           |   匿名可以访问
-     * denyAll             |   用户不能访问
-     * fullyAuthenticated  |   用户完全认证可以访问（非remember-me下自动登录）
-     * hasAnyAuthority     |   如果有参数，参数表示权限，则其中任何一个权限可以访问
-     * hasAnyRole          |   如果有参数，参数表示角色，则其中任何一个角色可以访问
-     * hasAuthority        |   如果有参数，参数表示权限，则其权限可以访问
-     * hasIpAddress        |   如果有参数，参数表示IP地址，如果用户IP和参数匹配，则可以访问
-     * hasRole             |   如果有参数，参数表示角色，则其角色可以访问
-     * permitAll           |   用户可以任意访问
-     * rememberMe          |   允许通过remember-me登录的用户访问
-     * authenticated       |   用户登录后可访问
+     * 规则优先级（从上到下）：
+     * 1. 静态资源、@PermitAll 接口、配置文件中指定的免登录 URL → 允许访问
+     * 2. 各模块自定义的权限规则（通过 authorizeRequestsCustomizers）→ 灵活控制
+     * 3. 所有其他请求 → 必须登录
      */
     @Bean
     protected SecurityFilterChain filterChain(HttpSecurity httpSecurity) throws Exception {
-        // 登出
+        // ===== 基础安全配置 =====
         httpSecurity
-                // 开启跨域
+                // 启用 CORS（跨域资源共享），前端才能调用后端接口
                 .cors(Customizer.withDefaults())
-                // CSRF 禁用，因为不使用 Session
+                // 禁用 CSRF（跨站请求伪造）保护，因为 Token 认证不需要（且 CSRF 依赖 Session）
                 .csrf(AbstractHttpConfigurer::disable)
-                // 基于 token 机制，所以不需要 Session
+                // 设置无状态（Stateless）：不创建 Session，完全靠 Token 认证
                 .sessionManagement(c -> c.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // 允许页面嵌入 iframe（如用于报表、SSE 等场景）
                 .headers(c -> c.frameOptions(HeadersConfigurer.FrameOptionsConfig::disable))
-                // 一堆自定义的 Spring Security 处理器
-                .exceptionHandling(c -> c.authenticationEntryPoint(authenticationEntryPoint)
-                        .accessDeniedHandler(accessDeniedHandler));
-        // 登录、登录暂时不使用 Spring Security 的拓展点，主要考虑一方面拓展多用户、多种登录方式相对复杂，一方面用户的学习成本较高
+                // 配置异常处理器
+                .exceptionHandling(c -> c
+                        .authenticationEntryPoint(authenticationEntryPoint)  // 未登录时调用
+                        .accessDeniedHandler(accessDeniedHandler)            // 权限不足时调用
+                );
 
-        // 获得 @PermitAll 带来的 URL 列表，免登录
+        // ===== 获取所有加了 @PermitAll 的接口路径 =====
         Multimap<HttpMethod, String> permitAllUrls = getPermitAllUrlsFromAnnotations();
-        // 设置每个请求的权限
-        httpSecurity
-                // ①：全局共享规则
-                .authorizeHttpRequests(c -> c
-                    // 1.1 静态资源，可匿名访问
-                    .requestMatchers(HttpMethod.GET, "/*.html", "/*.css", "/*.js").permitAll()
-                    // 1.2 设置 @PermitAll 无需认证
-                    .requestMatchers(HttpMethod.GET, permitAllUrls.get(HttpMethod.GET).toArray(new String[0])).permitAll()
-                    .requestMatchers(HttpMethod.POST, permitAllUrls.get(HttpMethod.POST).toArray(new String[0])).permitAll()
-                    .requestMatchers(HttpMethod.PUT, permitAllUrls.get(HttpMethod.PUT).toArray(new String[0])).permitAll()
-                    .requestMatchers(HttpMethod.DELETE, permitAllUrls.get(HttpMethod.DELETE).toArray(new String[0])).permitAll()
-                    .requestMatchers(HttpMethod.HEAD, permitAllUrls.get(HttpMethod.HEAD).toArray(new String[0])).permitAll()
-                    .requestMatchers(HttpMethod.PATCH, permitAllUrls.get(HttpMethod.PATCH).toArray(new String[0])).permitAll()
-                    // 1.3 基于 yudao.security.permit-all-urls 无需认证
-                    .requestMatchers(securityProperties.getPermitAllUrls().toArray(new String[0])).permitAll()
-                )
-                // ②：每个项目的自定义规则
-                .authorizeHttpRequests(c -> authorizeRequestsCustomizers.forEach(customizer -> customizer.customize(c)))
-                // ③：兜底规则，必须认证
-                .authorizeHttpRequests(c -> c
-                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll() // WebFlux 异步请求，无需认证，目的：SSE 场景
-                        .anyRequest().authenticated());
 
-        // 添加 Token Filter
+        // ===== 配置 URL 访问权限 =====
+        httpSecurity
+                // ① 全局通用规则
+                .authorizeHttpRequests(c -> c
+                        // 静态资源：.html、.css、.js 可直接访问
+                        .requestMatchers(HttpMethod.GET, "/*.html", "/*.css", "/*.js").permitAll()
+
+                        // @PermitAll 注解的接口：按 HTTP 方法分别放行
+                        .requestMatchers(HttpMethod.GET, permitAllUrls.get(HttpMethod.GET).toArray(new String[0])).permitAll()
+                        .requestMatchers(HttpMethod.POST, permitAllUrls.get(HttpMethod.POST).toArray(new String[0])).permitAll()
+                        .requestMatchers(HttpMethod.PUT, permitAllUrls.get(HttpMethod.PUT).toArray(new String[0])).permitAll()
+                        .requestMatchers(HttpMethod.DELETE, permitAllUrls.get(HttpMethod.DELETE).toArray(new String[0])).permitAll()
+                        .requestMatchers(HttpMethod.HEAD, permitAllUrls.get(HttpMethod.HEAD).toArray(new String[0])).permitAll()
+                        .requestMatchers(HttpMethod.PATCH, permitAllUrls.get(HttpMethod.PATCH).toArray(new String[0])).permitAll()
+
+                        // 配置文件中指定的免登录 URL（如 /admin-api/login）
+                        .requestMatchers(securityProperties.getPermitAllUrls().toArray(new String[0])).permitAll()
+                )
+                // ② 各模块自定义权限规则（例如：系统模块加自己的规则）
+                .authorizeHttpRequests(c -> authorizeRequestsCustomizers.forEach(customizer -> customizer.customize(c)))
+                // ③ 兜底规则：除了上面放行的，其他所有请求都必须登录
+                .authorizeHttpRequests(c -> c
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll() // 异步请求（如 SSE）放行
+                        .anyRequest().authenticated()
+                );
+
+        // ===== 添加自定义 Token 认证过滤器 =====
+        // 在 Spring Security 默认的用户名密码过滤器之前插入 Token 过滤器
         httpSecurity.addFilterBefore(authenticationTokenFilter, UsernamePasswordAuthenticationFilter.class);
+
+        // 构建并返回安全过滤器链
         return httpSecurity.build();
     }
 
+    /**
+     * 拼接 App API 的完整路径（项目中可能用到，但当前未使用）
+     */
     private String buildAppApi(String url) {
         return webProperties.getAppApi().getPrefix() + url;
     }
 
+    /**
+     * 通过反射扫描所有 Controller，找出哪些接口加了 @PermitAll 注解，
+     * 自动收集这些接口的 URL 和请求方法（GET/POST 等），用于放行。
+     *
+     * 例如：
+     *   @PermitAll
+     *   @GetMapping("/login")
+     *   public String login() { ... }
+     * → 自动放行 POST /login（如果方法上没写 method，则所有方法都放行）
+     *
+     * @return 多值 Map：HttpMethod → [url1, url2, ...]
+     */
     private Multimap<HttpMethod, String> getPermitAllUrlsFromAnnotations() {
         Multimap<HttpMethod, String> result = HashMultimap.create();
-        // 获得接口对应的 HandlerMethod 集合
-        RequestMappingHandlerMapping requestMappingHandlerMapping = (RequestMappingHandlerMapping)
+
+        // 1. 获取 Spring MVC 的请求映射处理器
+        RequestMappingHandlerMapping mapping = (RequestMappingHandlerMapping)
                 applicationContext.getBean("requestMappingHandlerMapping");
-        Map<RequestMappingInfo, HandlerMethod> handlerMethodMap = requestMappingHandlerMapping.getHandlerMethods();
-        // 获得有 @PermitAll 注解的接口
-        for (Map.Entry<RequestMappingInfo, HandlerMethod> entry : handlerMethodMap.entrySet()) {
-            HandlerMethod handlerMethod = entry.getValue();
-            if (!handlerMethod.hasMethodAnnotation(PermitAll.class) // 方法级
-                    && !handlerMethod.getBeanType().isAnnotationPresent(PermitAll.class)) { // 接口级
+
+        // 2. 获取所有接口（RequestMappingInfo）和对应的方法（HandlerMethod）
+        Map<RequestMappingInfo, HandlerMethod> handlerMethods = mapping.getHandlerMethods();
+
+        // 3. 遍历所有接口，检查是否有 @PermitAll 注解（方法级或类级）
+        for (Map.Entry<RequestMappingInfo, HandlerMethod> entry : handlerMethods.entrySet()) {
+            HandlerMethod method = entry.getValue();
+
+            // 如果方法或类上没有 @PermitAll，跳过
+            if (!method.hasMethodAnnotation(PermitAll.class) &&
+                    !method.getBeanType().isAnnotationPresent(PermitAll.class)) {
                 continue;
             }
+
+            // 4. 提取该接口的所有 URL 路径（支持 Ant 风格和 PathPattern）
             Set<String> urls = new HashSet<>();
             if (entry.getKey().getPatternsCondition() != null) {
                 urls.addAll(entry.getKey().getPatternsCondition().getPatterns());
@@ -176,45 +208,34 @@ public class YudaoWebSecurityConfigurerAdapter {
             if (entry.getKey().getPathPatternsCondition() != null) {
                 urls.addAll(convertList(entry.getKey().getPathPatternsCondition().getPatterns(), PathPattern::getPatternString));
             }
-            if (urls.isEmpty()) {
+            if (urls.isEmpty()) continue;
+
+            // 5. 提取 HTTP 请求方法（GET/POST 等）
+            Set<RequestMethod> methods = entry.getKey().getMethodsCondition().getMethods();
+
+            // 如果没指定方法（如只写了 @RequestMapping），默认放行所有方法
+            if (CollUtil.isEmpty(methods)) {
+                for (HttpMethod httpMethod : new HttpMethod[]{
+                        HttpMethod.GET, HttpMethod.POST, HttpMethod.PUT,
+                        HttpMethod.DELETE, HttpMethod.HEAD, HttpMethod.PATCH}) {
+                    result.putAll(httpMethod, urls);
+                }
                 continue;
             }
 
-            // 特殊：使用 @RequestMapping 注解，并且未写 method 属性，此时认为都需要免登录
-            Set<RequestMethod> methods = entry.getKey().getMethodsCondition().getMethods();
-            if (CollUtil.isEmpty(methods)) {
-                result.putAll(HttpMethod.GET, urls);
-                result.putAll(HttpMethod.POST, urls);
-                result.putAll(HttpMethod.PUT, urls);
-                result.putAll(HttpMethod.DELETE, urls);
-                result.putAll(HttpMethod.HEAD, urls);
-                result.putAll(HttpMethod.PATCH, urls);
-                continue;
-            }
-            // 根据请求方法，添加到 result 结果
-            entry.getKey().getMethodsCondition().getMethods().forEach(requestMethod -> {
+            // 6. 按实际指定的方法放行
+            for (RequestMethod requestMethod : methods) {
                 switch (requestMethod) {
-                    case GET:
-                        result.putAll(HttpMethod.GET, urls);
-                        break;
-                    case POST:
-                        result.putAll(HttpMethod.POST, urls);
-                        break;
-                    case PUT:
-                        result.putAll(HttpMethod.PUT, urls);
-                        break;
-                    case DELETE:
-                        result.putAll(HttpMethod.DELETE, urls);
-                        break;
-                    case HEAD:
-                        result.putAll(HttpMethod.HEAD, urls);
-                        break;
-                    case PATCH:
-                        result.putAll(HttpMethod.PATCH, urls);
-                        break;
+                    case GET:    result.putAll(HttpMethod.GET, urls); break;
+                    case POST:   result.putAll(HttpMethod.POST, urls); break;
+                    case PUT:    result.putAll(HttpMethod.PUT, urls); break;
+                    case DELETE: result.putAll(HttpMethod.DELETE, urls); break;
+                    case HEAD:   result.putAll(HttpMethod.HEAD, urls); break;
+                    case PATCH:  result.putAll(HttpMethod.PATCH, urls); break;
                 }
-            });
+            }
         }
+
         return result;
     }
 
