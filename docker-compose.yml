@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: 123456
       TZ: Asia/Shanghai
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./sql/postgresql:/docker-entrypoint-initdb.d
@@ -31,7 +31,7 @@ services:
     environment:
       TZ: Asia/Shanghai
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis-data:/data
     networks:
