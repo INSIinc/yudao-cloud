@@ -9,6 +9,8 @@ import cn.iocoder.yudao.module.system.controller.admin.dict.vo.data.DictDataSave
 import cn.iocoder.yudao.module.system.dal.dataobject.dict.DictDataDO;
 import cn.iocoder.yudao.module.system.dal.dataobject.dict.DictTypeDO;
 import cn.iocoder.yudao.module.system.dal.mysql.dict.DictDataMapper;
+import cn.iocoder.yudao.module.system.service.dict.DictDataServiceImpl;
+import cn.iocoder.yudao.module.system.service.dict.DictTypeService;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;

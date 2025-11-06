@@ -11,6 +11,8 @@ import cn.iocoder.yudao.module.system.dal.dataobject.social.SocialUserDO;
 import cn.iocoder.yudao.module.system.dal.mysql.social.SocialUserBindMapper;
 import cn.iocoder.yudao.module.system.dal.mysql.social.SocialUserMapper;
 import cn.iocoder.yudao.module.system.enums.social.SocialTypeEnum;
+import cn.iocoder.yudao.module.system.service.social.SocialClientService;
+import cn.iocoder.yudao.module.system.service.social.SocialUserServiceImpl;
 import jakarta.annotation.Resource;
 import me.zhyd.oauth.model.AuthUser;
 import org.junit.jupiter.api.Test;

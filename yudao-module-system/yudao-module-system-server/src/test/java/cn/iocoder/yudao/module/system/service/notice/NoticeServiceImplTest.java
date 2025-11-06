@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.system.controller.admin.notice.vo.NoticePageReqVO
 import cn.iocoder.yudao.module.system.controller.admin.notice.vo.NoticeSaveReqVO;
 import cn.iocoder.yudao.module.system.dal.dataobject.notice.NoticeDO;
 import cn.iocoder.yudao.module.system.dal.mysql.notice.NoticeMapper;
+import cn.iocoder.yudao.module.system.service.notice.NoticeServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;
 

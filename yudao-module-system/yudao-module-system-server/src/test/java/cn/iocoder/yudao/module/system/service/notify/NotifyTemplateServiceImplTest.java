@@ -7,6 +7,7 @@ import cn.iocoder.yudao.module.system.controller.admin.notify.vo.template.Notify
 import cn.iocoder.yudao.module.system.controller.admin.notify.vo.template.NotifyTemplateSaveReqVO;
 import cn.iocoder.yudao.module.system.dal.dataobject.notify.NotifyTemplateDO;
 import cn.iocoder.yudao.module.system.dal.mysql.notify.NotifyTemplateMapper;
+import cn.iocoder.yudao.module.system.service.notify.NotifyTemplateServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;
 

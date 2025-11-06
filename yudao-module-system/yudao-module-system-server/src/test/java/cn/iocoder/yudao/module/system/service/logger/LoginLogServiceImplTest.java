@@ -6,6 +6,7 @@ import cn.iocoder.yudao.module.system.api.logger.dto.LoginLogCreateReqDTO;
 import cn.iocoder.yudao.module.system.controller.admin.logger.vo.loginlog.LoginLogPageReqVO;
 import cn.iocoder.yudao.module.system.dal.dataobject.logger.LoginLogDO;
 import cn.iocoder.yudao.module.system.dal.mysql.logger.LoginLogMapper;
+import cn.iocoder.yudao.module.system.service.logger.LoginLogServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;
 

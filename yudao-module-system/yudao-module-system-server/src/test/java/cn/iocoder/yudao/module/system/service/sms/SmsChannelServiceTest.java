@@ -11,6 +11,8 @@ import cn.iocoder.yudao.module.system.dal.mysql.sms.SmsChannelMapper;
 import cn.iocoder.yudao.module.system.framework.sms.core.client.SmsClient;
 import cn.iocoder.yudao.module.system.framework.sms.core.client.SmsClientFactory;
 import cn.iocoder.yudao.module.system.framework.sms.core.property.SmsChannelProperties;
+import cn.iocoder.yudao.module.system.service.sms.SmsChannelServiceImpl;
+import cn.iocoder.yudao.module.system.service.sms.SmsTemplateService;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;

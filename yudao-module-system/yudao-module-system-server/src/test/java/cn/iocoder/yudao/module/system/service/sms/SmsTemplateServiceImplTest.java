@@ -15,6 +15,8 @@ import cn.iocoder.yudao.module.system.enums.sms.SmsTemplateTypeEnum;
 import cn.iocoder.yudao.module.system.framework.sms.core.client.SmsClient;
 import cn.iocoder.yudao.module.system.framework.sms.core.client.dto.SmsTemplateRespDTO;
 import cn.iocoder.yudao.module.system.framework.sms.core.enums.SmsTemplateAuditStatusEnum;
+import cn.iocoder.yudao.module.system.service.sms.SmsChannelService;
+import cn.iocoder.yudao.module.system.service.sms.SmsTemplateServiceImpl;
 import com.google.common.collect.Lists;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
