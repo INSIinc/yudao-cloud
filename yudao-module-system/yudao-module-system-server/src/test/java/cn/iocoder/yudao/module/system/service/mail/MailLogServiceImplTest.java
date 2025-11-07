@@ -10,6 +10,7 @@ import cn.iocoder.yudao.module.system.dal.dataobject.mail.MailLogDO;
 import cn.iocoder.yudao.module.system.dal.dataobject.mail.MailTemplateDO;
 import cn.iocoder.yudao.module.system.dal.mysql.mail.MailLogMapper;
 import cn.iocoder.yudao.module.system.enums.mail.MailSendStatusEnum;
+import cn.iocoder.yudao.module.system.service.mail.MailLogServiceImpl;
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;

@@ -7,6 +7,8 @@ import cn.iocoder.yudao.module.system.controller.admin.permission.vo.menu.MenuSa
 import cn.iocoder.yudao.module.system.dal.dataobject.permission.MenuDO;
 import cn.iocoder.yudao.module.system.dal.mysql.permission.MenuMapper;
 import cn.iocoder.yudao.module.system.enums.permission.MenuTypeEnum;
+import cn.iocoder.yudao.module.system.service.permission.MenuServiceImpl;
+import cn.iocoder.yudao.module.system.service.permission.PermissionService;
 import cn.iocoder.yudao.module.system.service.tenant.TenantService;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;

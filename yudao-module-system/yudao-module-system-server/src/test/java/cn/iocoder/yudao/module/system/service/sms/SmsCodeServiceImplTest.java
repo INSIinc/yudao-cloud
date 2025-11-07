@@ -9,6 +9,8 @@ import cn.iocoder.yudao.module.system.dal.dataobject.sms.SmsCodeDO;
 import cn.iocoder.yudao.module.system.dal.mysql.sms.SmsCodeMapper;
 import cn.iocoder.yudao.module.system.enums.sms.SmsSceneEnum;
 import cn.iocoder.yudao.module.system.framework.sms.config.SmsCodeProperties;
+import cn.iocoder.yudao.module.system.service.sms.SmsCodeServiceImpl;
+import cn.iocoder.yudao.module.system.service.sms.SmsSendService;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -90,7 +90,7 @@ package cn.iocoder.yudao.module.system.api.user;
 
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.module.system.api.user.dto.AdminUserRespDTO;
-import cn.iocoder.yudao.module.system.service.user.AdminUserService;
+import user.cn.iocoder.yudao.module.hr.service.AdminUserService;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.annotation.Resource;

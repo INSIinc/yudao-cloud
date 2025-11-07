@@ -6,6 +6,8 @@ import cn.iocoder.yudao.module.system.controller.admin.mail.vo.account.MailAccou
 import cn.iocoder.yudao.module.system.controller.admin.mail.vo.account.MailAccountSaveReqVO;
 import cn.iocoder.yudao.module.system.dal.dataobject.mail.MailAccountDO;
 import cn.iocoder.yudao.module.system.dal.mysql.mail.MailAccountMapper;
+import cn.iocoder.yudao.module.system.service.mail.MailAccountServiceImpl;
+import cn.iocoder.yudao.module.system.service.mail.MailTemplateService;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;

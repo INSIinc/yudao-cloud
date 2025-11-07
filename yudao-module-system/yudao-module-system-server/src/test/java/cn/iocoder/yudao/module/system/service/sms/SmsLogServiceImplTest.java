@@ -12,6 +12,7 @@ import cn.iocoder.yudao.module.system.dal.mysql.sms.SmsLogMapper;
 import cn.iocoder.yudao.module.system.enums.sms.SmsReceiveStatusEnum;
 import cn.iocoder.yudao.module.system.enums.sms.SmsSendStatusEnum;
 import cn.iocoder.yudao.module.system.enums.sms.SmsTemplateTypeEnum;
+import cn.iocoder.yudao.module.system.service.sms.SmsLogServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;
 

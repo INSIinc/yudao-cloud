@@ -9,6 +9,7 @@ import cn.iocoder.yudao.module.system.controller.admin.notify.vo.message.NotifyM
 import cn.iocoder.yudao.module.system.dal.dataobject.notify.NotifyMessageDO;
 import cn.iocoder.yudao.module.system.dal.dataobject.notify.NotifyTemplateDO;
 import cn.iocoder.yudao.module.system.dal.mysql.notify.NotifyMessageMapper;
+import cn.iocoder.yudao.module.system.service.notify.NotifyMessageServiceImpl;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Import;
