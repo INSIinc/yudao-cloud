@@ -24,7 +24,8 @@
         <module>yudao-module-mall</module>
         <module>yudao-module-crm</module>
         <module>yudao-module-erp</module>
-        <module>yudao-module-ai</module>
+        <!-- 临时注释：AI 模块依赖下载失败 -->
+        <!-- <module>yudao-module-ai</module> -->
         <module>yudao-module-iot</module>
         <module>yudao-module-hr</module>
     </modules>
