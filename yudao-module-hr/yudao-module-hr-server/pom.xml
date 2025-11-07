@@ -22,7 +22,6 @@
             <groupId>cn.iocoder.cloud</groupId>
             <artifactId>yudao-spring-boot-starter-env</artifactId>
         </dependency>
-
         <!-- 依赖服务 -->
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
@@ -39,7 +38,6 @@
             <artifactId>yudao-module-infra-api</artifactId>
             <version>${revision}</version>
         </dependency>
-
         <!-- 业务组件 -->
         <dependency>
             <groupId>cn.iocoder.cloud</groupId>
