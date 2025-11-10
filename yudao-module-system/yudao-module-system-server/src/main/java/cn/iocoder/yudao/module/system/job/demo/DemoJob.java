@@ -4,10 +4,10 @@ import cn.iocoder.yudao.framework.tenant.core.job.TenantJob;
 import com.xxl.job.core.handler.annotation.XxlJob;
 import org.springframework.stereotype.Component;
 
-@Component
+@Component("systemDemoJob")
 public class DemoJob {
 
-    @XxlJob("demoJob")
+    @XxlJob("systemDemoJob")
     @TenantJob
     public void execute() {
         System.out.println("美滋滋");
