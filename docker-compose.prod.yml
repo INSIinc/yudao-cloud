@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:16-alpine
+    container_name: yudao-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 123456
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - yudao-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: yudao-redis
+    restart: always
+    command: redis-server --requirepass 123456 --appendonly yes
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - yudao-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Yudao 后端服务
+  yudao-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yudao-server:latest
+    container_name: yudao-server
+    restart: always
+    ports:
+      - "48080:48080"
+    environment:
+      # Spring 配置
+      SPRING_PROFILES_ACTIVE: prod
+      TZ: Asia/Shanghai
+
+      # 数据库配置
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: app
+      DB_USERNAME: root
+      DB_PASSWORD: 123456
+
+      # Redis 配置
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: 0
+      REDIS_PASSWORD: 123456
+
+      # JVM 配置
+      JAVA_OPTS: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+
+      # 可选配置（根据需要取消注释）
+      # DRUID_PASSWORD: admin123
+      # XXL_JOB_ENABLED: true
+      # XXL_JOB_ADMIN_ADDRESSES: http://xxl-job-admin:8080/xxl-job-admin
+      # SPRING_BOOT_ADMIN_ENABLED: true
+      # SPRING_BOOT_ADMIN_URL: http://spring-boot-admin:8080
+
+      # 微信配置（生产环境请替换为实际值）
+      # WX_MP_APP_ID: your-mp-app-id
+      # WX_MP_SECRET: your-mp-secret
+      # WX_MINIAPP_APP_ID: your-miniapp-app-id
+      # WX_MINIAPP_SECRET: your-miniapp-secret
+
+      # 支付回调地址（生产环境请替换为实际域名）
+      # PAY_ORDER_NOTIFY_URL: http://your-domain.com/admin-api/pay/notify/order
+      # PAY_REFUND_NOTIFY_URL: http://your-domain.com/admin-api/pay/notify/refund
+      # PAY_TRANSFER_NOTIFY_URL: http://your-domain.com/admin-api/pay/notify/transfer
+    volumes:
+      - yudao-logs:/app/logs
+      - yudao-files:/app/files
+    networks:
+      - yudao-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:48080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  # PgAdmin（可选，用于数据库管理）
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: yudao-pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      TZ: Asia/Shanghai
+    ports:
+      - "5051:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - yudao-network
+    depends_on:
+      - postgres
+    profiles:
+      - tools # 使用 profile 控制，启动时需要指定 --profile tools
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  pgadmin-data:
+    driver: local
+  yudao-logs:
+    driver: local
+  yudao-files:
+    driver: local
+
+networks:
+  yudao-network:
+    driver: bridge

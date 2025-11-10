@@ -15,8 +15,7 @@
         <module>yudao-server</module>
         <!--  各种 module 拓展 -->
         <module>yudao-module-system</module>
-        <!-- 临时注释：基础设施模块 -->
-        <!-- <module>yudao-module-infra</module>-->
+        <module>yudao-module-infra</module>
         <!-- 临时注释：会员模块 -->
         <!-- <module>yudao-module-member</module>-->
         <module>yudao-module-bpm</module>
