@@ -67,13 +67,13 @@ spring:
           url: jdbc:postgresql://127.0.0.1:5433/app?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&nullCatalogMeansCurrent=true
           username: root
           password: 123456
-#        tdengine: # IoT 数据库（需要 IoT 物联网再开启噢！
-#          url: jdbc:TAOS-RS://127.0.0.1:6041/ruoyi_vue_pro
-#          driver-class-name: com.taosdata.jdbc.rs.RestfulDriver
-#          username: root
-#          password: taosdata
-#          druid:
-#            validation-query: SELECT SERVER_STATUS() # TDengine 数据源的有效性检查 SQL
+  #        tdengine: # IoT 数据库（需要 IoT 物联网再开启噢！
+  #          url: jdbc:TAOS-RS://127.0.0.1:6041/ruoyi_vue_pro
+  #          driver-class-name: com.taosdata.jdbc.rs.RestfulDriver
+  #          username: root
+  #          password: taosdata
+  #          druid:
+  #            validation-query: SELECT SERVER_STATUS() # TDengine 数据源的有效性检查 SQL
 
   # Redis 配置。Redisson 默认的配置足够使用，一般不需要进行调优
   data:
@@ -175,12 +175,12 @@ debug: false
 --- #################### 微信公众号、小程序相关配置 ####################
 wx:
   mp: # 公众号配置（必填），参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-mp-spring-boot-starter/README.md 文档
-#    app-id: wx041349c6f39b268b # 测试号（牛希尧提供的）
-#    secret: 5abee519483bc9f8cb37ce280e814bd0
+    #    app-id: wx041349c6f39b268b # 测试号（牛希尧提供的）
+    #    secret: 5abee519483bc9f8cb37ce280e814bd0
     app-id: wx5b23ba7a5589ecbb # 测试号（自己的）
     secret: 2a7b3b20c537e52e74afd395eb85f61f
-#    app-id: wxa69ab825b163be19 # 测试号（Kongdy 提供的）
-#    secret: bd4f9fab889591b62aeac0d7b8d8b4a0
+    #    app-id: wxa69ab825b163be19 # 测试号（Kongdy 提供的）
+    #    secret: bd4f9fab889591b62aeac0d7b8d8b4a0
     # 存储配置，解决 AccessToken 的跨节点的共享
     config-storage:
       type: RedisTemplate # 采用 RedisTemplate 操作 Redis，会自动从 Spring 中获取
@@ -189,12 +189,12 @@ wx:
   miniapp: # 小程序配置（必填），参见 https://github.com/Wechat-Group/WxJava/blob/develop/spring-boot-starters/wx-java-miniapp-spring-boot-starter/README.md 文档
     #    appid: wx62056c0d5e8db250 # 测试号（牛希尧提供的）
     #    secret: 333ae72f41552af1e998fe1f54e1584a
-#    appid: wx63c280fe3248a3e7 # wenhualian的接口测试号
-#    secret: 6f270509224a7ae1296bbf1c8cb97aed
+    #    appid: wx63c280fe3248a3e7 # wenhualian的接口测试号
+    #    secret: 6f270509224a7ae1296bbf1c8cb97aed
     appid: wxc4598c446f8a9cb3 # 测试号（Kongdy 提供的）
     secret: 4a1a04e07f6a4a0751b39c3064a92c8b
-#    appid: wx66186af0759f47c9 # 测试号（puhui 提供的）
-#    secret: 3218bcbd112cbc614c7264ceb20144ac
+    #    appid: wx66186af0759f47c9 # 测试号（puhui 提供的）
+    #    secret: 3218bcbd112cbc614c7264ceb20144ac
     config-storage:
       type: RedisTemplate # 采用 RedisTemplate 操作 Redis，会自动从 Spring 中获取
       key-prefix: wa # Redis Key 的前缀
@@ -208,6 +208,7 @@ yudao:
     enable: false # 本地环境，暂时关闭图片验证码，方便登录等接口的测试；
   security:
     mock-enable: true
+    mock-secret: test
   pay:
     order-notify-url: http://yunai.natapp1.cc/admin-api/pay/notify/order # 支付渠道的【支付】回调地址
     refund-notify-url: http://yunai.natapp1.cc/admin-api/pay/notify/refund # 支付渠道的【退款】回调地址
@@ -250,5 +251,5 @@ justauth:
 
 --- #################### iot相关配置 TODO 芋艿【IOT】：再瞅瞅 ####################
 pf4j:
-#  pluginsDir: /tmp/
+  #  pluginsDir: /tmp/
   pluginsDir: ../plugins

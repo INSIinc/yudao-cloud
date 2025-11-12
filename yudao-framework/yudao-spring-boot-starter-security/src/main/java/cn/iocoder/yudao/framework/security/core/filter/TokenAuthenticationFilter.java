@@ -2,6 +2,8 @@ package cn.iocoder.yudao.framework.security.core.filter;
 
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.iocoder.yudao.framework.common.biz.system.oauth2.OAuth2TokenCommonApi;
+import cn.iocoder.yudao.framework.common.biz.system.oauth2.dto.OAuth2AccessTokenCheckRespDTO;
 import cn.iocoder.yudao.framework.common.exception.ServiceException;
 import cn.iocoder.yudao.framework.common.pojo.CommonResult;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
@@ -11,8 +13,6 @@ import cn.iocoder.yudao.framework.security.core.LoginUser;
 import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
 import cn.iocoder.yudao.framework.web.core.handler.GlobalExceptionHandler;
 import cn.iocoder.yudao.framework.web.core.util.WebFrameworkUtils;
-import cn.iocoder.yudao.framework.common.biz.system.oauth2.OAuth2TokenCommonApi;
-import cn.iocoder.yudao.framework.common.biz.system.oauth2.dto.OAuth2AccessTokenCheckRespDTO;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -106,11 +106,11 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
 
     /**
      * 模拟登录用户，方便日常开发调试
-     *
+     * <p>
      * 注意，在线上环境下，一定要关闭该功能！！！
      *
-     * @param request 请求
-     * @param token 模拟的 token，格式为 {@link SecurityProperties#getMockSecret()} + 用户编号
+     * @param request  请求
+     * @param token    模拟的 token，格式为 {@link SecurityProperties#getMockSecret()} + 用户编号
      * @param userType 用户类型
      * @return 模拟的 LoginUser
      */
@@ -147,7 +147,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             }
             return loginUser;
         } catch (Exception ex) {
-            log.error("[buildLoginUserByHeader][解析 LoginUser({}) 发生异常]", loginUserStr, ex);  ;
+            log.error("[buildLoginUserByHeader][解析 LoginUser({}) 发生异常]", loginUserStr, ex);
             throw ex;
         }
     }
