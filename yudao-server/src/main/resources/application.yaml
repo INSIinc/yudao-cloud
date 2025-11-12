@@ -7,7 +7,7 @@ spring:
 
   main:
     allow-circular-references: true # 允许循环依赖，因为项目是三层架构，无法避免这个情况。
-#    allow-bean-definition-overriding: false # 允许 Bean 覆盖，例如说 Feign 等会存在重复定义的服务
+    allow-bean-definition-overriding: true # 允许 Bean 覆盖，例如说 Feign 等会存在重复定义的服务
 
   # Servlet 配置
   servlet:
@@ -46,7 +46,8 @@ spring:
         enabled: false # 禁用 Nacos 的注册发现
       config:
         enabled: false # 禁用 Nacos 的配置中心
-#    openfeign:
+    openfeign:
+      enabled: false # 单体模式下禁用 OpenFeign
 #      lazy-attributes-resolution: true
 #      client:
 #        refresh-enabled: false

@@ -16,17 +16,24 @@
         <!--  各种 module 拓展 -->
         <module>yudao-module-system</module>
         <module>yudao-module-infra</module>
-        <module>yudao-module-member</module>
+        <!-- 临时注释：会员模块 -->
+        <!-- <module>yudao-module-member</module>-->
         <module>yudao-module-bpm</module>
-        <module>yudao-module-pay</module>
-        <module>yudao-module-report</module>
-        <module>yudao-module-mp</module>
-        <module>yudao-module-mall</module>
-        <module>yudao-module-crm</module>
-        <module>yudao-module-erp</module>
-        <!-- 临时注释：AI 模块依赖下载失败 -->
+        <!-- 临时注释：支付模块 -->
+        <!-- <module>yudao-module-pay</module>-->
+        <!-- 临时注释：大屏汇报模块 -->
+        <!-- <module>yudao-module-report</module>-->
+        <!-- 临时注释：公众号模块 -->
+        <!-- <module>yudao-module-mp</module>-->
+        <!-- 临时注释：商城模块 -->
+        <!-- <module>yudao-module-mall</module>-->
+        <!-- 临时注释：Crm模块 -->
+        <!-- <module>yudao-module-crm</module>-->
+        <!-- 临时注释：Erp模块 -->
+        <!-- <module>yudao-module-erp</module> -->
+        <!-- 临时注释：AI 模块 -->
         <!-- <module>yudao-module-ai</module> -->
-        <module>yudao-module-iot</module>
+        <!-- <module>yudao-module-iot</module>-->
         <module>yudao-module-hr</module>
     </modules>
 
