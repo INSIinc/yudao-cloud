@@ -35,6 +35,8 @@
         <!-- <module>yudao-module-ai</module> -->
         <!-- <module>yudao-module-iot</module>-->
         <module>yudao-module-hr</module>
+        <module>yudao-module-train</module>
+        <module>yudao-module-train/yudao-module-train-server</module>
     </modules>
 
     <name>${project.artifactId}</name>
