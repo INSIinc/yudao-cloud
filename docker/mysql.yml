@@ -1,0 +1,26 @@
+services:
+  mysql:
+    image: mysql:8.0.32 # arm: mysql-arm:8.0.32
+    container_name: yudao-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: nacos
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - ${MYSQL_DATA_PATH:-./volumes/mysql-data}:/var/lib/mysql
+      - ../sql/mysql/nacos-mysql-schema.sql:/docker-entrypoint-initdb.d/nacos-mysql-schema.sql
+    networks:
+      - yudao-network
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-123456}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  yudao-network:
+    driver: bridge

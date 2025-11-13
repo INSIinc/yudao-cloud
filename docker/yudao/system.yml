@@ -1,0 +1,62 @@
+services:
+  yudao-system:
+    image: yudao-system:latest
+    container_name: yudao-system
+    restart: always
+    environment:
+      # Spring 配置
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      TZ: ${TZ:-Asia/Shanghai}
+
+      # Nacos 配置
+      NACOS_HOST: nacos
+      NACOS_PORT: 8848
+      NACOS_USERNAME: ${NACOS_USERNAME:-}
+      NACOS_PASSWORD: ${NACOS_PASSWORD:-}
+      NACOS_NAMESPACE: ${NACOS_NAMESPACE:-}
+
+      # 数据库配置
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-app}
+      DB_USERNAME: ${POSTGRES_USER:-root}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+
+      # 从库配置（如果有）
+      DB_SLAVE_HOST: ${DB_SLAVE_HOST:-postgres}
+      DB_SLAVE_PORT: ${DB_SLAVE_PORT:-5432}
+      DB_SLAVE_NAME: ${DB_SLAVE_NAME:-app}
+      DB_SLAVE_USERNAME: ${DB_SLAVE_USERNAME:-root}
+      DB_SLAVE_PASSWORD: ${DB_SLAVE_PASSWORD:-123456}
+
+      # Redis 配置
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
+
+      # JVM 参数
+      JAVA_OPTS: ${SYSTEM_JAVA_OPTS:--Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxGCPauseMillis=200}
+    ports:
+      - "${SYSTEM_PORT:-48081}:48081"
+    volumes:
+      - ${SYSTEM_LOGS_PATH:-./volumes/yudao-system-logs}:/yudao-module-system-server/logs
+    networks:
+      - yudao-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 sh -c 'cat < /dev/null > /dev/tcp/127.0.0.1/48081' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+networks:
+  yudao-network:
+    driver: bridge

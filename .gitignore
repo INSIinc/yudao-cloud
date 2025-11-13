@@ -73,3 +73,6 @@ functions/mock
 screenshot
 .firebase
 sessionStore
+
+# Docker volumes
+volumes/

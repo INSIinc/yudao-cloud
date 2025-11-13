@@ -182,9 +182,9 @@ wx:
 # 芋道配置项，设置当前项目所有自定义的配置
 yudao:
   captcha:
-    enable: true # 生产环境开启图片验证码
+    enable: false # 生产环境开启图片验证码
   security:
-    mock-enable: false # 生产环境关闭 Mock 功能
+    mock-enable: true # 生产环境关闭 Mock 功能
   pay:
     order-notify-url: ${PAY_ORDER_NOTIFY_URL:http://your-domain.com/admin-api/pay/notify/order} # 支付渠道的【支付】回调地址
     refund-notify-url: ${PAY_REFUND_NOTIFY_URL:http://your-domain.com/admin-api/pay/notify/refund} # 支付渠道的【退款】回调地址

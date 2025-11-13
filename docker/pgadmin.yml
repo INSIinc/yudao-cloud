@@ -1,0 +1,22 @@
+services:
+  pgadmin:
+    image: dpage/pgadmin4:latest # arm: dpage/pgadmin4-arm:latest
+    container_name: yudao-pgadmin
+    restart: always
+    user: root  # 以 root 身份运行以避免权限问题，容器会自动切换到 pgadmin 用户
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${PGADMIN_PORT:-5051}:80"
+    volumes:
+      - ${PGADMIN_DATA_PATH:-./volumes/pgadmin-data}:/var/lib/pgadmin
+    networks:
+      - yudao-network
+    depends_on:
+      - postgres
+
+networks:
+  yudao-network:
+    driver: bridge

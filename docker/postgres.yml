@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16-alpine # arm: postgres:15-alpine
+    container_name: yudao-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-root}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ${POSTGRES_DATA_PATH:-./volumes/postgres-data}:/var/lib/postgresql/data
+    networks:
+      - yudao-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-root} -d ${POSTGRES_DB:-app}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  yudao-network:
+    driver: bridge

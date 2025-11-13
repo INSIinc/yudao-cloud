@@ -1,0 +1,52 @@
+services:
+  yudao-gateway:
+    image: yudao-gateway:latest
+    container_name: yudao-gateway
+    restart: always
+    environment:
+      # Spring 配置
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      TZ: ${TZ:-Asia/Shanghai}
+
+      # Nacos 配置
+      NACOS_HOST: nacos
+      NACOS_PORT: 8848
+      NACOS_USERNAME: ${NACOS_USERNAME:-}
+      NACOS_PASSWORD: ${NACOS_PASSWORD:-}
+      NACOS_NAMESPACE: ${NACOS_NAMESPACE:-}
+
+      # Redis 配置（网关需要 Redis 用于限流等功能）
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
+
+      # JVM 参数
+      JAVA_OPTS: ${GATEWAY_JAVA_OPTS:--Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200}
+    ports:
+      - "${GATEWAY_PORT:-48080}:48080"
+    volumes:
+      - ${GATEWAY_LOGS_PATH:-./volumes/yudao-gateway-logs}:/yudao-gateway/logs
+    networks:
+      - yudao-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+      yudao-system:
+        condition: service_started
+      yudao-infra:
+        condition: service_started
+      yudao-bpm:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 sh -c 'cat < /dev/null > /dev/tcp/127.0.0.1/48080' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+networks:
+  yudao-network:
+    driver: bridge

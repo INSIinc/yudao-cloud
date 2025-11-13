@@ -65,10 +65,6 @@ yarn-error.log
 .env.local
 .env.*.local
 
-# 其他不需要的文件
-*.jar
-*.war
-*.zip
-*.tar.gz
-*.rar
-.flattened-pom.xml
+# Docker volumes 和数据目录
+volumes/
+docker/

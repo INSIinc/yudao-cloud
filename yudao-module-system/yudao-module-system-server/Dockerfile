@@ -1,19 +1,48 @@
-## AdoptOpenJDK 停止发布 OpenJDK 二进制，而 Eclipse Temurin 是它的延伸，提供更好的稳定性
-## 感谢复旦核博士的建议！灰子哥，牛皮！
-FROM eclipse-temurin:21-jre
+# ============================
+# 第一阶段：构建阶段
+# ============================
+FROM maven:3.9-eclipse-temurin-17-alpine AS builder
 
-## 创建目录，并使用它作为工作目录
+# 设置工作目录
+WORKDIR /build
+
+# 复制整个项目源码（.dockerignore 会排除不必要的文件）
+COPY . .
+
+# 只编译 system 模块及其依赖（-pl 指定模块，-am 包含依赖模块）
+# -DskipTests 跳过测试，-Dmaven.test.skip=true 跳过测试编译
+# 使用 prod profile（如果 pom.xml 中有定义的话）
+RUN mvn clean package \
+    -pl yudao-module-system/yudao-module-system-server \
+    -am \
+    -DskipTests \
+    -Dmaven.test.skip=true \
+    -Dspring.profiles.active=prod \
+    --batch-mode
+
+# ============================
+# 第二阶段：运行阶段
+# ============================
+FROM eclipse-temurin:17-jre-alpine-3.21
+
+# 安装必要的工具（可选，用于调试）
+RUN apk add --no-cache tzdata
+
+# 创建目录，并使用它作为工作目录
 RUN mkdir -p /yudao-module-system-server
 WORKDIR /yudao-module-system-server
-## 将后端项目的 Jar 文件，复制到镜像中
-COPY ./target/yudao-module-system-server.jar app.jar
 
-## 设置 TZ 时区
-## 设置 JAVA_OPTS 环境变量，可通过 docker run -e "JAVA_OPTS=" 进行覆盖
-ENV TZ=Asia/Shanghai JAVA_OPTS="-Xms512m -Xmx512m"
+# 从构建阶段复制编译好的 jar 文件
+COPY --from=builder /build/yudao-module-system/yudao-module-system-server/target/yudao-module-system-server.jar app.jar
 
-## 暴露后端项目的 48080 端口
+# 设置时区和 JAVA_OPTS 环境变量
+# 可通过 docker run -e "JAVA_OPTS=" 进行覆盖
+ENV TZ=Asia/Shanghai \
+    JAVA_OPTS="-Xms512m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200" \
+    SPRING_PROFILES_ACTIVE=prod
+
+# 暴露后端项目的 48081 端口
 EXPOSE 48081
 
-## 启动后端项目
-CMD java ${JAVA_OPTS} -Djava.security.egd=file:/dev/./urandom -jar app.jar
+# 启动后端项目
+CMD ["sh", "-c", "java ${JAVA_OPTS} -Djava.security.egd=file:/dev/./urandom -Dspring.profiles.active=${SPRING_PROFILES_ACTIVE} -jar app.jar"]

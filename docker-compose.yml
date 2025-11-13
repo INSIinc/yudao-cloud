@@ -1,99 +1,33 @@
-version: '3.8'
+# 本地开发环境 Docker Compose 配置
+# 使用 Docker Compose 拆分配置文件，方便管理和维护
 
-services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: yudao-postgres
-    restart: always
-    environment:
-      POSTGRES_DB: app
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: 123456
-      TZ: Asia/Shanghai
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      # 注释掉自动初始化脚本，改用 Flyway 管理数据库迁移
-      # - ./sql/postgresql:/docker-entrypoint-initdb.d
-    networks:
-      - yudao-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d app"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+# 包含基础设施服务
+include:
+  # PostgreSQL 数据库（本地开发默认端口 5433）
+  - path: docker/postgres.yml
+    env_file: .env
 
-  redis:
-    image: redis:7-alpine
-    container_name: yudao-redis
-    restart: always
-    command: redis-server --requirepass 123456 --appendonly yes
-    environment:
-      TZ: Asia/Shanghai
-    ports:
-      - "6380:6379"
-    volumes:
-      - redis-data:/data
-    networks:
-      - yudao-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+  # Redis 缓存（本地开发默认端口 6380）
+  - path: docker/redis.yml
+    env_file: .env
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: yudao-pgadmin
-    restart: always
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-      TZ: Asia/Shanghai
-    ports:
-      - "5051:80"
-    volumes:
-      - pgadmin-data:/var/lib/pgadmin
-    networks:
-      - yudao-network
-    depends_on:
-      - postgres
+  # PgAdmin 数据库管理工具（本地开发默认端口 5051）
+  - path: docker/pgadmin.yml
+    env_file: .env
 
-  minio:
-    image: minio/minio:latest
-    container_name: yudao-minio
-    restart: always
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-      TZ: Asia/Shanghai
-    ports:
-      - "9000:9000"
-      - "9001:9001" # 如果需要使用 MinIO Console, 可以映射这个端口
-    volumes:
-      - minio-data:/data
-    networks:
-      - yudao-network
-    command: server /data --console-address ":9001" # 这里指定了控制台的地址和端口
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+  # MinIO 对象存储（本地开发默认端口 9000/9001）
+  - path: docker/minio.yml
+    env_file: .env
 
-volumes:
-  mysql-data:
-    driver: local
-  postgres-data:
-    driver: local
-  redis-data:
-    driver: local
-  pgadmin-data:
-    driver: local
-  minio-data:
-    driver: local
+  # MySQL 数据库（可选，仅用于 Nacos，取消注释以启用）
+  # - path: docker/mysql.yml
+  #   env_file: .env
 
+  # Nacos 注册中心和配置中心（可选，微服务模式需要，取消注释以启用）
+  # - path: docker/nacos.yml
+  #   env_file: .env
+
+# 共享网络
 networks:
   yudao-network:
     driver: bridge
