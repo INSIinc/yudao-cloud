@@ -1,145 +1,46 @@
-version: '3.8'
+# 生产环境 Docker Compose 配置
+# 使用 Docker Compose 拆分配置文件，方便管理和维护
+include:
+  # 基础设施服务 - PostgreSQL 数据库（生产环境默认端口 5432）
+  - path: docker/postgres.yml
+    env_file: .env
 
-services:
-  # PostgreSQL 数据库
-  postgres:
-    image: postgres:16-alpine
-    container_name: yudao-postgres
-    restart: always
-    environment:
-      POSTGRES_DB: app
-      POSTGRES_USER: root
-      POSTGRES_PASSWORD: 123456
-      TZ: Asia/Shanghai
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - yudao-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d app"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # 基础设施服务 - Redis 缓存（生产环境默认端口 6379）
+  - path: docker/redis.yml
+    env_file: .env
 
-  # Redis 缓存
-  redis:
-    image: redis:7-alpine
-    container_name: yudao-redis
-    restart: always
-    command: redis-server --requirepass 123456 --appendonly yes
-    environment:
-      TZ: Asia/Shanghai
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    networks:
-      - yudao-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+  # 基础设施服务 - MySQL 数据库（Nacos 使用，默认端口 3306）
+  - path: docker/mysql.yml
+    env_file: .env
 
-  # Yudao 后端服务
-  yudao-server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: yudao-server:latest
-    container_name: yudao-server
-    restart: always
-    ports:
-      - "48080:48080"
-    environment:
-      # Spring 配置
-      SPRING_PROFILES_ACTIVE: prod
-      TZ: Asia/Shanghai
+  # 基础设施服务 - Nacos 注册中心和配置中心（默认端口 8848）
+  - path: docker/nacos.yml
+    env_file: .env
 
-      # 数据库配置
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: app
-      DB_USERNAME: root
-      DB_PASSWORD: 123456
+  # 基础设施服务 - PgAdmin 数据库管理工具（可选，默认端口 5051）
+  - path: docker/pgadmin.yml
+    env_file: .env
 
-      # Redis 配置
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DATABASE: 0
-      REDIS_PASSWORD: 123456
+  # 应用服务 - Yudao System 系统功能模块（默认端口 48081）
+  - path: docker/yudao/system.yml
+    env_file: .env
 
-      # JVM 配置
-      JAVA_OPTS: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+  # 应用服务 - Yudao Infra 基础设施模块（默认端口 48082）
+  - path: docker/yudao/infra.yml
+    env_file: .env
 
-      # 可选配置（根据需要取消注释）
-      # DRUID_PASSWORD: admin123
-      # XXL_JOB_ENABLED: true
-      # XXL_JOB_ADMIN_ADDRESSES: http://xxl-job-admin:8080/xxl-job-admin
-      # SPRING_BOOT_ADMIN_ENABLED: true
-      # SPRING_BOOT_ADMIN_URL: http://spring-boot-admin:8080
+  # 应用服务 - Yudao BPM 工作流模块（默认端口 48083）
+  - path: docker/yudao/bpm.yml
+    env_file: .env
 
-      # 微信配置（生产环境请替换为实际值）
-      # WX_MP_APP_ID: your-mp-app-id
-      # WX_MP_SECRET: your-mp-secret
-      # WX_MINIAPP_APP_ID: your-miniapp-app-id
-      # WX_MINIAPP_SECRET: your-miniapp-secret
+  # 应用服务 - Yudao Gateway 网关服务（默认端口 48080）
+  - path: docker/yudao/gateway.yml
+    env_file: .env
 
-      # 支付回调地址（生产环境请替换为实际域名）
-      # PAY_ORDER_NOTIFY_URL: http://your-domain.com/admin-api/pay/notify/order
-      # PAY_REFUND_NOTIFY_URL: http://your-domain.com/admin-api/pay/notify/refund
-      # PAY_TRANSFER_NOTIFY_URL: http://your-domain.com/admin-api/pay/notify/transfer
-    volumes:
-      - yudao-logs:/app/logs
-      - yudao-files:/app/files
-    networks:
-      - yudao-network
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:48080/actuator/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 60s
-      retries: 3
+  - path: docker/app.yml
+    env_file: .env
 
-  # PgAdmin（可选，用于数据库管理）
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: yudao-pgadmin
-    restart: always
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-      TZ: Asia/Shanghai
-    ports:
-      - "5051:80"
-    volumes:
-      - pgadmin-data:/var/lib/pgadmin
-    networks:
-      - yudao-network
-    depends_on:
-      - postgres
-    profiles:
-      - tools # 使用 profile 控制，启动时需要指定 --profile tools
-
-volumes:
-  postgres-data:
-    driver: local
-  redis-data:
-    driver: local
-  pgadmin-data:
-    driver: local
-  yudao-logs:
-    driver: local
-  yudao-files:
-    driver: local
-
+# 共享网络
 networks:
   yudao-network:
     driver: bridge

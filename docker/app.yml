@@ -1,0 +1,37 @@
+services:
+  app:
+    image: strato:amd
+    container_name: strato-web
+    ports:
+      - "${APP_PORT:-80}:80"  # 映射到主机的 48081 端口
+    environment:
+      # 后端 API 地址
+      VITE_BASE_URL: ${VITE_BASE_URL:-http://localhost:48080}
+      # 默认语言
+      VITE_DEFAULT_LOCALE: ${VITE_DEFAULT_LOCALE:-zh-CN}
+      # 环境标识
+      VITE_ENV: ${VITE_ENV:-production}
+      NODE_ENV: ${NODE_ENV:-production}
+      VITE_APP_TENANT_ENABLE: ${VITE_APP_TENANT_ENABLE:-true}
+      VITE_APP_DEFAULT_TENANT_ID: ${VITE_APP_DEFAULT_TENANT_ID:-1}
+      VITE_APP_DEFAULT_LOGIN_TENANT: ${VITE_APP_DEFAULT_LOGIN_TENANT:-default}
+    restart: unless-stopped
+    networks:
+      - yudao-network
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  yudao-network:
+    driver: bridge

@@ -1,0 +1,75 @@
+services:
+  yudao-infra:
+    image: yudao-infra:latest
+    container_name: yudao-infra
+    restart: always
+    environment:
+      # Spring 配置
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      TZ: ${TZ:-Asia/Shanghai}
+
+      # Nacos 配置
+      NACOS_HOST: nacos
+      NACOS_PORT: 8848
+      NACOS_USERNAME: ${NACOS_USERNAME:-}
+      NACOS_PASSWORD: ${NACOS_PASSWORD:-}
+      NACOS_NAMESPACE: ${NACOS_NAMESPACE:-}
+
+      # 数据库配置
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-app}
+      DB_USERNAME: ${POSTGRES_USER:-root}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+
+      # 从库配置（如果有）
+      DB_SLAVE_HOST: ${DB_SLAVE_HOST:-postgres}
+      DB_SLAVE_PORT: ${DB_SLAVE_PORT:-5432}
+      DB_SLAVE_NAME: ${DB_SLAVE_NAME:-app}
+      DB_SLAVE_USERNAME: ${DB_SLAVE_USERNAME:-root}
+      DB_SLAVE_PASSWORD: ${DB_SLAVE_PASSWORD:-123456}
+
+      # Redis 配置
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
+
+      # MQ 配置（按需启用）
+#      ROCKETMQ_NAME_SERVER: ${ROCKETMQ_NAME_SERVER:-}
+#      RABBITMQ_HOST: ${RABBITMQ_HOST:-}
+#      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+#      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+#      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+#      KAFKA_SERVERS: ${KAFKA_SERVERS:-}
+
+      # XXL-Job 配置（按需启用）
+#      XXL_JOB_ENABLED: ${XXL_JOB_ENABLED:-false}
+#      XXL_JOB_ADMIN_ADDRESSES: ${XXL_JOB_ADMIN_ADDRESSES:-}
+
+      # JVM 参数
+      JAVA_OPTS: ${INFRA_JAVA_OPTS:--Xms512m -Xmx1g -XX:+UseG1GC -XX:MaxGCPauseMillis=200}
+    ports:
+      - "${INFRA_PORT:-48082}:48082"
+    volumes:
+      - ${INFRA_LOGS_PATH:-./volumes/yudao-infra-logs}:/yudao-module-infra-server/logs
+      - ${INFRA_FILES_PATH:-./volumes/yudao-files}:/yudao-module-infra-server/files
+    networks:
+      - yudao-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 sh -c 'cat < /dev/null > /dev/tcp/127.0.0.1/48082' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+networks:
+  yudao-network:
+    driver: bridge

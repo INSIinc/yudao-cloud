@@ -1,7 +1,7 @@
 # ============================
-# 第一阶段：构建阶段
+# 第一阶段：构建阶段 (ARM64)
 # ============================
-FROM maven:3.9-eclipse-temurin-17-alpine AS builder
+FROM maven:3.8.8-eclipse-temurin-21-alpine-arm AS builder
 
 # 设置工作目录
 WORKDIR /build
@@ -21,12 +21,15 @@ RUN mvn clean package \
     --batch-mode
 
 # ============================
-# 第二阶段：运行阶段
+# 第二阶段：运行阶段 (ARM64)
 # ============================
-FROM eclipse-temurin:17-jre-alpine-3.21
+FROM eclipse-temurin:21-jre-arm
 
 # 安装必要的工具（可选，用于调试）
-RUN apk add --no-cache tzdata
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tzdata && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # 创建目录，并使用它作为工作目录
 RUN mkdir -p /yudao-module-bpm-server

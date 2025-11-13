@@ -1,22 +1,15 @@
 --- #################### 注册中心 + 配置中心相关配置 ####################
+# 本地开发环境：单体模式，禁用微服务相关配置
 
 spring:
   cloud:
     nacos:
-      server-addr: 127.0.0.1:8848 # Nacos 服务器地址
-      username: # Nacos 账号
-      password: # Nacos 密码
-      discovery: # 【配置中心】配置项
-        enabled: false
-        namespace: dev # 命名空间。这里使用 dev 开发环境
-        group: DEFAULT_GROUP # 使用的 Nacos 配置分组，默认为 DEFAULT_GROUP
-        metadata:
-          version: 1.0.0 # 服务实例的版本号，可用于灰度发布
-      config: # 【注册中心】配置项
-        enabled: false
-        namespace: dev # 命名空间。这里使用 dev 开发环境
-        group: DEFAULT_GROUP # 使用的 Nacos 配置分组，默认为 DEFAULT_GROUP
-
+      discovery: # 【服务发现】配置项
+        enabled: false # 本地开发使用单体模式，禁用服务发现
+      config: # 【配置中心】配置项
+        enabled: false # 禁用配置中心
+    openfeign: # 【OpenFeign】配置项
+      enabled: false # 单体模式下禁用 OpenFeign
 --- #################### 数据库相关配置 ####################
 spring:
   # 数据源配置项
@@ -81,7 +74,7 @@ spring:
   data:
     redis:
       host: 127.0.0.1 # 地址
-      port: 6379 # 端口
+      port: 6380 # 端口（对应 docker-compose.yml 中映射的端口）
       database: 0 # 数据库索引
       password: 123456 # 密码，建议生产环境开启
 

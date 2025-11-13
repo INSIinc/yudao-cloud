@@ -1,0 +1,125 @@
+--- #################### 注册中心 + 配置中心相关配置 ####################
+# 生产环境：微服务模式，启用 Nacos 和 OpenFeign
+
+spring:
+  cloud:
+    nacos:
+      server-addr: ${NACOS_HOST:127.0.0.1}:${NACOS_PORT:8848} # Nacos 服务器地址
+      username: ${NACOS_USERNAME:} # Nacos 账号
+      password: ${NACOS_PASSWORD:} # Nacos 密码
+      discovery: # 【服务发现】配置项
+        enabled: true # 启用服务发现
+        namespace: ${NACOS_NAMESPACE:} # 命名空间，建议生产环境使用独立命名空间
+        group: DEFAULT_GROUP # 使用的 Nacos 配置分组，默认为 DEFAULT_GROUP
+        metadata:
+          version: 1.0.0 # 服务实例的版本号，可用于灰度发布
+      config: # 【配置中心】配置项
+        enabled: false # 禁用配置中心（如需要可启用）
+        namespace: ${NACOS_NAMESPACE:} # 命名空间
+        group: DEFAULT_GROUP # 使用的 Nacos 配置分组，默认为 DEFAULT_GROUP
+    openfeign: # 【OpenFeign】配置项
+      enabled: true # 启用 OpenFeign，微服务模式必须开启
+
+--- #################### 数据库相关配置 ####################
+spring:
+  datasource:
+    druid: # Druid 【监控】相关的全局配置
+      web-stat-filter:
+        enabled: true
+      stat-view-servlet:
+        enabled: false # 生产环境建议关闭 Druid 监控页面
+      filter:
+        stat:
+          enabled: true
+          log-slow-sql: true # 慢 SQL 记录
+          slow-sql-millis: 100
+          merge-sql: true
+        wall:
+          config:
+            multi-statement-allow: true
+    dynamic: # 多数据源配置
+      druid: # Druid 【连接池】相关的全局配置
+        initial-size: 5 # 初始连接数
+        min-idle: 10 # 最小连接池数量
+        max-active: 50 # 最大连接池数量
+        max-wait: 60000 # 配置获取连接等待超时的时间，单位：毫秒
+        time-between-eviction-runs-millis: 60000 # 配置间隔多久才进行一次检测，检测需要关闭的空闲连接，单位：毫秒
+        min-evictable-idle-time-millis: 600000 # 配置一个连接在池中最小生存的时间，单位：毫秒
+        max-evictable-idle-time-millis: 1800000 # 配置一个连接在池中最大生存的时间，单位：毫秒
+        validation-query: SELECT 1
+        test-while-idle: true
+        test-on-borrow: false
+        test-on-return: false
+        pool-prepared-statements: true
+        max-pool-prepared-statement-per-connection-size: 20
+      primary: master
+      datasource:
+        master:
+          url: jdbc:postgresql://${DB_HOST:127.0.0.1}:${DB_PORT:5432}/${DB_NAME:app}?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true
+          username: ${DB_USERNAME:root}
+          password: ${DB_PASSWORD:}
+        slave: # 从库配置
+          lazy: true
+          url: jdbc:postgresql://${DB_SLAVE_HOST:127.0.0.1}:${DB_SLAVE_PORT:5432}/${DB_SLAVE_NAME:app}?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true&rewriteBatchedStatements=true
+          username: ${DB_SLAVE_USERNAME:root}
+          password: ${DB_SLAVE_PASSWORD:}
+
+  # Redis 配置
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1} # 地址
+      port: ${REDIS_PORT:6379} # 端口
+      database: ${REDIS_DATABASE:0} # 数据库索引
+      password: ${REDIS_PASSWORD:} # 密码，生产环境务必配置
+
+--- #################### MQ 消息队列相关配置 ####################
+
+--- #################### 定时任务相关配置 ####################
+
+xxl:
+  job:
+    enabled: ${XXL_JOB_ENABLED:false} # 是否开启调度中心
+    admin:
+      addresses: ${XXL_JOB_ADMIN_ADDRESSES:http://127.0.0.1:9090/xxl-job-admin}
+
+--- #################### 服务保障相关配置 ####################
+
+# Lock4j 配置项
+lock4j:
+  acquire-timeout: 3000 # 获取分布式锁超时时间
+  expire: 30000 # 分布式锁的超时时间
+
+--- #################### 监控相关配置 ####################
+
+# Actuator 监控端点的配置项
+management:
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: 'health,info,prometheus' # 生产环境建议只开放必要的端点
+
+# Spring Boot Admin 配置项
+spring:
+  boot:
+    admin:
+      client:
+        instance:
+          service-host-type: IP # 注册实例时，优先使用 IP
+
+# 日志文件配置
+logging:
+  level:
+    # 生产环境日志级别
+    cn.iocoder.yudao.module.bpm.dal.mysql: info
+    org.springframework.context.support.PostProcessorRegistrationDelegate: ERROR
+
+--- #################### 芋道相关配置 ####################
+
+yudao:
+  env:
+    tag: ${HOSTNAME}
+  security:
+    mock-enable: false # 生产环境禁用 Mock
+  access-log:
+    enable: true
