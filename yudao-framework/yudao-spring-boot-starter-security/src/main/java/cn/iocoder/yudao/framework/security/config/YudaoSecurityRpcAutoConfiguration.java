@@ -1,8 +1,8 @@
 package cn.iocoder.yudao.framework.security.config;
 
+import cn.iocoder.yudao.framework.common.biz.system.oauth2.OAuth2TokenCommonApi;
 import cn.iocoder.yudao.framework.common.biz.system.permission.PermissionCommonApi;
 import cn.iocoder.yudao.framework.security.core.rpc.LoginUserRequestInterceptor;
-import cn.iocoder.yudao.framework.common.biz.system.oauth2.OAuth2TokenCommonApi;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.context.annotation.Bean;

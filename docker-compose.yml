@@ -20,12 +20,12 @@ include:
     env_file: .env
 
   # MySQL 数据库（可选，仅用于 Nacos，取消注释以启用）
-  # - path: docker/mysql.yml
-  #   env_file: .env
+  - path: docker/mysql.yml
+    env_file: .env
 
   # Nacos 注册中心和配置中心（可选，微服务模式需要，取消注释以启用）
-  # - path: docker/nacos.yml
-  #   env_file: .env
+  - path: docker/nacos.yml
+    env_file: .env
 
 # 共享网络
 networks:

@@ -7,18 +7,18 @@
         <version>${revision}</version> <!-- 1. 修改 version 为 ${revision} -->
     </parent>
 
-    <artifactId>yudao-module-train</artifactId>
+    <artifactId>yudao-module-person</artifactId>
 
     <packaging>pom</packaging> <!-- 2. 新增 packaging 为 pom -->
 
 
     <name>${project.artifactId}</name> <!-- 3. 新增 name 为 ${project.artifactId} -->
     <description> <!-- 4. 新增 description 为该模块的描述 -->
-        demo 模块，主要实现 XXX、YYY、ZZZ 等功能。
+        person 模块，主要实现 XXX、YYY、ZZZ 等功能。
     </description>
     <modules>
-        <module>yudao-module-train-api</module>
-        <module>yudao-module-train-server</module>
+        <module>yudao-module-person-api</module>
+        <module>yudao-module-person-server</module>
     </modules>
 
 
