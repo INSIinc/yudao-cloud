@@ -64,13 +64,20 @@ spring:
           username: ${DB_SLAVE_USERNAME:root}
           password: ${DB_SLAVE_PASSWORD:}
 
-  # Redis 配置
+  # Redis 配置。Redisson 默认的配置足够使用，一般不需要进行调优
   data:
     redis:
-      host: ${REDIS_HOST:127.0.0.1} # 地址
-      port: ${REDIS_PORT:6379} # 端口
+      host: ${REDIS_HOST:redis} # 地址，支持环境变量
+      port: ${REDIS_PORT:6379} # 端口，支持环境变量
       database: ${REDIS_DATABASE:0} # 数据库索引
-      password: ${REDIS_PASSWORD:} # 密码，生产环境务必配置
+      password: ${REDIS_PASSWORD:} # 密码，生产环境必须开启
+
+  # Flyway 配置
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true} # 启用 Flyway，支持环境变量控制
+    locations: ${FLYWAY_LOCATIONS:classpath:db/migration/mysql} # 迁移脚本路径，默认 MySQL，支持环境变量
+    baseline-on-migrate: true # 如果数据库不是空的，需要先建立基线
+    baseline-version: 0 # 基线版本
 
 --- #################### MQ 消息队列相关配置 ####################
 

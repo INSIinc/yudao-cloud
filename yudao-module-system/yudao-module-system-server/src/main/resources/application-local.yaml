@@ -79,6 +79,13 @@ spring:
       database: 0 # 数据库索引
       password: 123456 # 密码，建议生产环境开启
 
+  # Flyway 配置
+  flyway:
+    enabled: false # 启用 Flyway
+    locations: classpath:db/migration/postgresql # PostgreSQL 的迁移脚本路径
+    baseline-on-migrate: true # 如果数据库不是空的，需要先建立基线
+    baseline-version: 0 # 基线版本
+
 --- #################### MQ 消息队列相关配置 ####################
 
 # rocketmq 配置项，对应 RocketMQProperties 配置类
